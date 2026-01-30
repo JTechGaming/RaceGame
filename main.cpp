@@ -1,3 +1,7 @@
+// cmake -S . -B build
+// cmake --build build --config Release
+// .\build\game.exe
+
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
@@ -10,8 +14,14 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#define CPPHTTPLIB_OPENSSL_SUPPORT
+#include <httplib.h>
+#include <nlohmann/json.hpp>
+
 // std
+#include <fstream>
 #include <iostream>
+#include <vector>
 
 #define WIREFRAME_MODE false
 
@@ -35,6 +45,24 @@ unsigned int indices[] = {
 unsigned int texture;
 
 int main() {
+
+    const std::string apiKey = "AIzaSyAaPt24fsctrBPz6iqM7WGgr-B0FIo74nw";
+    const std::string host = "tile.googleapis.com";
+    const std::string path = "/v1/3dtiles/root.json?key=" + apiKey;
+
+    httplib::Client client(host.c_str());
+    auto res = client.Get(path.c_str());
+    if(!res || res->status != 200) {
+        std::cerr << "Failed to fetch root tileset\n";
+        return 1;
+    }
+
+    // Save the JSON to disk
+    std::ofstream out("root.json");
+    out << res->body;
+    out.close();
+    std::cout << "Saved root.json (" << res->body.size() << " bytes)\n";
+
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -149,6 +177,8 @@ int main() {
     }
 
     glfwTerminate();
+
+
     return 0;
 }
 
