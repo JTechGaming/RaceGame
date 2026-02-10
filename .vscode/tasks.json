@@ -4,7 +4,7 @@
         {
             "label": "Build & Run",
             "type": "shell",
-            "command": "/usr/bin/g++ -fdiagnostics-color=always -I/Users/1010182/Documents/RaceGame/libs -L/Users/1010182/Documents/RaceGame/libs /Users/1010182/Documents/RaceGame/main.cpp /Users/1010182/Documents/RaceGame/libs/glad.cpp -o /Users/1010182/Documents/RaceGame/game -lglfw3 -framework Cocoa -framework CoreFoundation -framework CoreGraphics -framework IOKit -framework AppKit ; /Users/1010182/Documents/RaceGame/game",
+            "command": "/usr/bin/g++ -std=c++20 -fdiagnostics-color=always -I/Users/1010182/Documents/RaceGame/libs -L/Users/1010182/Documents/RaceGame/libs /Users/1010182/Documents/RaceGame/main.cpp /Users/1010182/Documents/RaceGame/libs/glad.cpp -o /Users/1010182/Documents/RaceGame/output/game -lglfw3 -framework Cocoa -framework CoreFoundation -framework CoreGraphics -framework IOKit -framework AppKit ; /Users/1010182/Documents/RaceGame/output/game",
             "group": "build",
             "presentation": {
                 "reveal": "always"

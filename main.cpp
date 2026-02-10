@@ -1,7 +1,7 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
-#include "model.h"
+#include "model.hpp"
 #include "shader.h"
 
 #include <glm/glm.hpp>
@@ -73,7 +73,7 @@ int main() {
     // tell stb_image.h to flip loaded texture's on the y-axis (before loading models).
     stbi_set_flip_vertically_on_load(true);
 
-    Model testModel("models/test.obj");
+    Model testModel("models/backpack.obj");
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
