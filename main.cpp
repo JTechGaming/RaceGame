@@ -69,11 +69,16 @@ int main() {
     glfwSetScrollCallback(window, scrollCallback);
 
     Shader shader("shaders/vertexShader.glsl", "shaders/fragmentShader.glsl");
+    Shader uvShader("shaders/vertexShader.glsl", "shaders/uv_debug.glsl");
+    bool showUV = false;
+    bool prevUState = false;
+    bool showChecker = false;
+    bool prevCState = false;
 
     // tell stb_image.h to flip loaded texture's on the y-axis (before loading models).
     stbi_set_flip_vertically_on_load(true);
 
-    Model testModel("models/backpack.obj");
+    Model testModel("/Users/1010182/Documents/RaceGame/models/backpack/backpack.obj");
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
@@ -92,7 +97,17 @@ int main() {
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;  
 
-        shader.use();
+        // toggle UV debug visualization with U key (edge detect)
+        bool uPressed = glfwGetKey(window, GLFW_KEY_U) == GLFW_PRESS;
+        if (uPressed && !prevUState) showUV = !showUV;
+        prevUState = uPressed;
+
+        // toggle checker visualization with C key
+        bool cPressed = glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS;
+        if (cPressed && !prevCState) showChecker = !showChecker;
+        prevCState = cPressed;
+
+        if (showUV) uvShader.use(); else shader.use();
 
         glm::mat4 view;
         view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
@@ -101,14 +116,15 @@ int main() {
         projection = glm::perspective(glm::radians(fov), WIDTH / HEIGHT, 0.1f, 100.0f);
         view = glm::translate(view, glm::vec3(0.0f, 0.0f, -3.0f));
 
-        shader.setMat4("projection", projection);
-        shader.setMat4("view", view);
+        Shader &active = showUV ? uvShader : shader;
+        active.setMat4("projection", projection);
+        active.setMat4("view", view);
 
         glm::mat4 model = glm::mat4(1.0f);
         model = glm::translate(model, glm::vec3(0.0f, 0.0f, 0.0f));
         model = glm::scale(model, glm::vec3(1.0f, 1.0f, 1.0f));
-        shader.setMat4("model", model);
-        testModel.draw(shader);
+        active.setMat4("model", model);
+        testModel.draw(active);
 
         // end of rendering code
 
