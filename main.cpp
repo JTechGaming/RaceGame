@@ -78,7 +78,7 @@ int main() {
     // tell stb_image.h to flip loaded texture's on the y-axis (before loading models).
     stbi_set_flip_vertically_on_load(true);
 
-    Model testModel("/Users/1010182/Documents/RaceGame/models/backpack/backpack.obj");
+    Model testModel("/Users/1010182/Documents/RaceGame/models/car/car.obj");
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
