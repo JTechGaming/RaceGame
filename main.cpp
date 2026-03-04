@@ -1,6 +1,13 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
+// define the single-header macro once in a translation unit to provide
+// RapidYAML implementations.  When building multiple .cpp files this should be
+// defined in exactly one of them (or pass -DRYML_SINGLE_HDR_DEFINE_NOW to
+// the compiler).
+#define RYML_SINGLE_HDR_DEFINE_NOW
+#include "sceneManager.hpp"
+
 #include "model.hpp"
 #include "shader.h"
 
@@ -19,9 +26,6 @@ void framebufferSizeCallback(GLFWwindow* window, int width, int height);
 void drawFrame(Shader& shader);
 void mouseCallback(GLFWwindow* window, double xpos, double ypos);
 void scrollCallback(GLFWwindow* window, double xpos, double ypos);
-
-constexpr float WIDTH = 800.0f;
-constexpr float HEIGHT = 600.0f;
 
 glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 3.0f);
 glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
@@ -47,7 +51,14 @@ int main() {
         glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     #endif
   
-    GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "Race Game", NULL, NULL);
+    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+    const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+    glfwWindowHint(GLFW_RED_BITS, mode->redBits);
+    glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
+    glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
+    glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+
+    GLFWwindow* window = glfwCreateWindow(mode->width, mode->height, "Race Game", NULL, NULL);
     if (window == NULL) {
         std::cout << "Failed to create GLFW window" << std::endl;
         glfwTerminate();
@@ -60,9 +71,13 @@ int main() {
         return -1;
     }
 
+    findScenes();
+
     glEnable(GL_DEPTH_TEST);
     
-    glViewport(0, 0, WIDTH, HEIGHT);
+    int fbWidth, fbHeight;
+    glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+    glViewport(0, 0, fbWidth, fbHeight);
 
     glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
     glfwSetCursorPosCallback(window, mouseCallback); 
@@ -113,7 +128,7 @@ int main() {
         view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
 
         glm::mat4 projection = glm::mat4(1.0f);
-        projection = glm::perspective(glm::radians(fov), WIDTH / HEIGHT, 0.1f, 100.0f);
+        projection = glm::perspective(glm::radians(fov), (float)mode->width / (float)mode->height, 0.1f, 100.0f);
         view = glm::translate(view, glm::vec3(0.0f, 0.0f, -3.0f));
 
         Shader &active = showUV ? uvShader : shader;
@@ -195,8 +210,7 @@ void mouseCallback(GLFWwindow* window, double xpos, double ypos) {
     cameraFront = glm::normalize(direction);
 }
 
-void scrollCallback(GLFWwindow* window, double xoffset, double yoffset)
-{
+void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
     fov -= (float)yoffset;
     if (fov < 5.0f)
         fov = 5.0f;
