@@ -8,7 +8,8 @@
 #define RYML_SINGLE_HDR_DEFINE_NOW
 #include "sceneManager.hpp"
 
-#include "model.hpp"
+#include "assetManager.hpp"
+
 #include "shader.h"
 
 #include <glm/glm.hpp>
@@ -26,6 +27,7 @@ void framebufferSizeCallback(GLFWwindow* window, int width, int height);
 void drawFrame(Shader& shader);
 void mouseCallback(GLFWwindow* window, double xpos, double ypos);
 void scrollCallback(GLFWwindow* window, double xpos, double ypos);
+void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 
 glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 3.0f);
 glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
@@ -41,6 +43,11 @@ bool firstMouse = true;
 float fov = 90.0f;
 
 unsigned int texture;
+
+std::string stringPath;
+
+AssetManager assetManager{};
+SceneManager sceneManager{};
 
 int main() {
     glfwInit();
@@ -71,7 +78,25 @@ int main() {
         return -1;
     }
 
-    findScenes();
+    char* path;
+    int dirnameLength;
+    int length = wai_getExecutablePath(NULL, 0, NULL);
+    path = (char*)malloc(length + 1);
+    wai_getExecutablePath(path, length, &dirnameLength);
+    path[length] = '\0';
+
+    // Convert to string and get scene path
+    std::copy(path, path + length, std::back_inserter(stringPath));
+    char regex = '/';
+    size_t foundIndex;
+    foundIndex = stringPath.find_last_of(regex);
+    if (foundIndex == std::string::npos) {
+        std::cout << "Failed to find executable path\n";
+        return;
+    }
+    stringPath = stringPath.substr(0, foundIndex);
+
+    sceneManager.findScenes(stringPath);
 
     glEnable(GL_DEPTH_TEST);
     
@@ -82,6 +107,7 @@ int main() {
     glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
     glfwSetCursorPosCallback(window, mouseCallback); 
     glfwSetScrollCallback(window, scrollCallback);
+    glfwSetKeyCallback(window, keyCallback);
 
     Shader shader("shaders/vertexShader.glsl", "shaders/fragmentShader.glsl");
     Shader uvShader("shaders/vertexShader.glsl", "shaders/uv_debug.glsl");
@@ -89,11 +115,6 @@ int main() {
     bool prevUState = false;
     bool showChecker = false;
     bool prevCState = false;
-
-    // tell stb_image.h to flip loaded texture's on the y-axis (before loading models).
-    stbi_set_flip_vertically_on_load(true);
-
-    Model testModel("/Users/1010182/Documents/RaceGame/models/car/car.obj");
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
@@ -134,12 +155,15 @@ int main() {
         Shader &active = showUV ? uvShader : shader;
         active.setMat4("projection", projection);
         active.setMat4("view", view);
-
-        glm::mat4 model = glm::mat4(1.0f);
-        model = glm::translate(model, glm::vec3(0.0f, 0.0f, 0.0f));
-        model = glm::scale(model, glm::vec3(1.0f, 1.0f, 1.0f));
-        active.setMat4("model", model);
-        testModel.draw(active);
+        
+        ParsedScene currentScene = sceneManager.getScene();
+        for (auto& sceneObject : currentScene.sceneObjects) {
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, sceneObject.transform.pos);
+            model = glm::scale(model, sceneObject.transform.scale);
+            active.setMat4("model", model);
+            assetManager.modelPool.getOrLoad(stringPath.append(sceneObject.modelPath))->draw(active);
+        }
 
         // end of rendering code
 
@@ -216,4 +240,11 @@ void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
         fov = 5.0f;
     if (fov > 120.0f)
         fov = 120.0f; 
+}
+
+void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    if (key == GLFW_KEY_R && action == GLFW_PRESS) {
+        std::cout << "Hotswapping current scene" << '\n';
+        sceneManager.reloadScene(stringPath);   
+    }
 }

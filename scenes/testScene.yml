@@ -1,22 +1,17 @@
 name: "Test Scene"
-models:
-  - name: "Car"
-    identifier: "models/car"
-  - name: "Wheel"
-    identifier: "models/wheel"
 
 sceneObjects:
-  - model: "Car"
+  - model: "models/car"
     pawnID: 1      # Anything higher than 0 is a valid ID
     transform: {
-      pos: [ 1.0, 0.0, 0.0 ],
+      pos: [ 4.0, 0.0, 0.0 ],
       rot: [ 0.0, 0.0, 0.0 ],
       scale: [ 1.0, 1.0, 1.0 ]
     }
-  - model: "Car"
+  - model: "models/cube"
     pawnID: 2      # Anything higher than 0 is a valid ID
     transform: {
-      pos: [ 0.0, 1.0, 0.0 ],
+      pos: [ 0.0, 4.0, 2.0 ],
       rot: [ 0.0, 0.0, 0.0 ],
       scale: [ 1.0, 1.0, 1.0 ]
     }
