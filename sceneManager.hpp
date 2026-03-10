@@ -34,22 +34,16 @@ struct ParsedScene {
 
 class SceneManager {
 public:
-    // forward declarations
-    void parseScene(const std::string &path, std::string stringPath);
-    void loadScene(const ParsedScene* scene);
-    void unloadScene();
-    void reloadScene(std::string stringPath);
-
     void findScenes(std::string stringPath) {
         // Find all scenes
-        std::string scenePath = stringPath.append("/scenes");
+        std::string scenePath = stringPath + "/scenes";
         struct stat sb;
         for (const auto& entry : std::filesystem::directory_iterator(scenePath)) {
             std::filesystem::path outfilename = entry.path();
             std::string outfilename_str = outfilename.string();
             const char* filePath = outfilename_str.c_str();
             if (stat(filePath, &sb) == 0 && !(sb.st_mode & S_IFDIR)) {
-                std ::cout << filePath << std::endl;
+                //std ::cout << filePath << std::endl;
                 std::string stringFilePath;
                 std::copy(filePath, filePath + std::strlen(filePath), std::back_inserter(stringFilePath));
                 if (stringFilePath.find(".yml") != std::string::npos) {
@@ -199,8 +193,6 @@ public:
         currentScene = scene;
     }
 
-    void unloadScene() { }
-
     void reloadScene(std::string stringPath) {
         parseScene(currentScene.scenePath, stringPath);
     }
@@ -211,5 +203,4 @@ public:
 
 private:
     ParsedScene currentScene;
-
 };

@@ -5,11 +5,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <unordered_map>
 
-#define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
-
-#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 #include <vector>
@@ -17,16 +15,25 @@
 
 #define MAX_BONE_INFLUENCE 4
 
+// Forward declarations
+class AssetManager;
+
+struct Texture {
+    unsigned int id;
+    std::string type;
+    std::string path;
+};
+
 class Resource {
 public:
     std::string filePath;
-    virtual void load(const std::string& path, AssetManager& assetManager) = 0;
+    virtual void load(const std::string& path) = 0;
     virtual ~Resource() {}
 };
 
-class TextureResource : Resource {
+class TextureResource : public Resource {
 public:
-    void load(const std::string& path, AssetManager& assetManager) override {
+    void load(const std::string& path) override {
         // Don't flip images here; we invert OBJ V coordinates instead
         stbi_set_flip_vertically_on_load(false);
         unsigned char *data = stbi_load(path.c_str(), &width, &height, &nrComponents, 0);
@@ -83,13 +90,12 @@ class Mesh {
 public:
     std::vector<Vertex> vertices;
     std::vector<unsigned int> indices;
-    std::vector<Texture> textures;   
+    std::vector<Texture> textures;
     
-    Mesh(std::vector<Vertex> vertices, std::vector<unsigned int> indices, std::vector<Texture> textures) {
-        this->vertices = vertices;
-        this->indices = indices;
-        this->textures = textures;
-
+    Mesh() = default;
+    
+    Mesh(std::vector<Vertex> vertices, std::vector<unsigned int> indices, std::vector<Texture> textures) 
+        : vertices(std::move(vertices)), indices(std::move(indices)), textures(std::move(textures)) {
         setupMesh();
     }
     void setupMesh() {
@@ -146,21 +152,97 @@ private:
     unsigned int VAO, VBO, EBO;
 };
 
-struct Texture {
-    unsigned int id;;
-    std::string type;
-    std::string path;
+// Forward declaration of ModelResource
+class ModelResource;
+
+// AssetManager definition with nested Pool template
+class AssetManager {
+public:
+    static std::string buildModelPath(const std::string &modelPath) {
+        namespace fs = std::filesystem;
+        fs::path p(modelPath);
+        std::string stem = p.filename().string();
+        if (stem.empty()) {
+            // fallback if path ends with slash or is empty
+            return modelPath;
+        }
+        // construct candidate: original path + '/' + stem + ".obj"
+        fs::path candidate = p;
+        candidate /= stem + ".obj";
+        return candidate.string();
+    }
+
+    template<typename T>
+    class Pool {
+    public:
+        Pool(AssetManager* manager) : assetManager(manager) {}
+        
+        T* getOrLoad(const std::string& path) {
+            if (pool.find(path) != pool.end()) {
+                return pool[path];
+            }
+            T* resource = new T();
+            resource->load(path);
+            pool[path] = resource;
+            return resource;
+        }
+
+        void cleanup() {
+            for (auto const& [path, resource] : pool) {
+                delete resource;
+            }
+            pool.clear();
+        }   
+
+    private:
+        std::unordered_map<std::string, T*> pool;
+        AssetManager* assetManager;
+    };
+
+    Pool<TextureResource> texturePool;
+    Pool<ModelResource> modelPool;
+
+    AssetManager() : texturePool(this), modelPool(this) {}
+
+    ModelResource* loadModel(const std::string& path) {
+        ModelResource* model = modelPool.getOrLoad(path);
+        return model;
+    }
 };
 
+// Now define ModelResource after AssetManager is declared
 class ModelResource : public Resource {
+private:
+    static AssetManager* s_assetManager;
+    std::vector<Mesh> meshes;
+    std::string directory;
+
 public:
+    static void setAssetManager(AssetManager* manager) {
+        s_assetManager = manager;
+    }
+    
     void draw(Shader &shader) {
         for (unsigned int i=0; i<meshes.size(); i++) {
             meshes[i].draw(shader);
         }
     }
 
-    void load(const std::string& path, AssetManager& assetManager) override {
+    void load(const std::string& path) override {
+        std::cerr << "ModelResource::load called with path: " << path << '\n';
+        namespace fs = std::filesystem;
+        if (fs::exists(path) && fs::is_directory(path)) {
+            // try to resolve an obj within the directory
+            fs::path dir(path);
+            fs::path candidate = dir / (dir.filename().string() + ".obj");
+            if (fs::exists(candidate)) {
+                std::cerr << "Resolved directory to file: " << candidate.string() << '\n';
+                load(candidate.string()); // recursion with proper path
+                return;
+            }
+            std::cerr << "Error: directory passed to ModelResource::load and no obj found: " << path << '\n';
+            return;
+        }
         // store directory for texture loading
         size_t pos = path.find_last_of('/');
         if (pos == std::string::npos) {
@@ -171,31 +253,44 @@ public:
         tinyobj::ObjReaderConfig reader_config;
         reader_config.mtl_search_path = directory;
 
+        std::cerr << "Texture directory: " << directory << '\n';
+
         tinyobj::ObjReader reader;
 
         if (!reader.ParseFromFile(path, reader_config)) {
             if (!reader.Error().empty()) {
                 std::cerr << "TinyObjReader: " << reader.Error();
             }
+            std::cout << "parse failed for path: " << path << '\n';
             return;
         }
-
+        std::cerr << "parse succeeded for " << path << '\n';
         if (!reader.Warning().empty()) {
-            std::cout << "TinyObjReader: " << reader.Warning();
+            std::cout << "TinyObjReader warning: " << reader.Warning();
         }
 
         auto& attrib = reader.GetAttrib();
         auto& shapes = reader.GetShapes();
         auto& materials = reader.GetMaterials();
 
+        std::cerr << "attrib sizes: verts=" << attrib.vertices.size()
+                  << " normals=" << attrib.normals.size()
+                  << " texcoords=" << attrib.texcoords.size() << '\n';
+        std::cerr << "shapes count=" << shapes.size() << " materials=" << materials.size() << '\n';
+
         // Loop over shapes and create Mesh objects grouped by material
         for (size_t s = 0; s < shapes.size(); s++) {
+            std::cerr << "processing shape " << s << " with faces="
+                      << shapes[s].mesh.num_face_vertices.size() << '\n';
             // group by material id -> per-material vertex/index arrays
             struct MeshData { std::vector<Vertex> vertices; std::vector<unsigned int> indices; };
             std::map<int, MeshData> groups;
 
             size_t index_offset = 0;
             for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) {
+                if (f % 500 == 0) {
+                    std::cerr << "  shape " << s << " face " << f << "\n";
+                }
                 size_t fv = size_t(shapes[s].mesh.num_face_vertices[f]);
 
                 int mat_id = -1;
@@ -204,6 +299,9 @@ public:
                 }
 
                 for (size_t v = 0; v < fv; v++) {
+                    if (v == 0 && f % 1000 == 0) {
+                        std::cerr << "    face " << f << " starts, fv=" << fv << "\n";
+                    }
                     tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
                     Vertex vertex;
 
@@ -215,18 +313,30 @@ public:
                     }
 
                     if (idx.normal_index >= 0 && !attrib.normals.empty()) {
-                        tinyobj::real_t nx = attrib.normals[3 * size_t(idx.normal_index) + 0];
-                        tinyobj::real_t ny = attrib.normals[3 * size_t(idx.normal_index) + 1];
-                        tinyobj::real_t nz = attrib.normals[3 * size_t(idx.normal_index) + 2];
-                        vertex.normal = glm::vec3(nx, ny, nz);
+                        size_t ni = size_t(idx.normal_index);
+                        if (3*ni + 2 >= attrib.normals.size()) {
+                            std::cerr << "ERROR: normal_index out of range: " << ni << " normals.size=" << attrib.normals.size() << '\n';
+                            vertex.normal = glm::vec3(0.0f);
+                        } else {
+                            tinyobj::real_t nx = attrib.normals[3 * ni + 0];
+                            tinyobj::real_t ny = attrib.normals[3 * ni + 1];
+                            tinyobj::real_t nz = attrib.normals[3 * ni + 2];
+                            vertex.normal = glm::vec3(nx, ny, nz);
+                        }
                     } else {
                         vertex.normal = glm::vec3(0.0f);
                     }
 
                     if (idx.texcoord_index >= 0 && !attrib.texcoords.empty()) {
-                        tinyobj::real_t tx = attrib.texcoords[2 * size_t(idx.texcoord_index) + 0];
-                        tinyobj::real_t ty = attrib.texcoords[2 * size_t(idx.texcoord_index) + 1];
-                        vertex.texCoord = glm::vec2(tx, ty);
+                        size_t ti = size_t(idx.texcoord_index);
+                        if (2*ti + 1 >= attrib.texcoords.size()) {
+                            std::cerr << "ERROR: texcoord_index out of range: " << ti << " texcoords.size=" << attrib.texcoords.size() << '\n';
+                            vertex.texCoord = glm::vec2(0.0f);
+                        } else {
+                            tinyobj::real_t tx = attrib.texcoords[2 * ti + 0];
+                            tinyobj::real_t ty = attrib.texcoords[2 * ti + 1];
+                            vertex.texCoord = glm::vec2(tx, ty);
+                        }
                     } else {
                         vertex.texCoord = glm::vec2(0.0f);
                     }
@@ -250,7 +360,7 @@ public:
                     if (!mat.diffuse_texname.empty()) {
                         std::string fullPath = directory + mat.diffuse_texname;
                         
-                        TextureResource* res = assetManager.texturePool.getOrLoad(fullPath);
+                        TextureResource* res = s_assetManager->texturePool.getOrLoad(fullPath);
                         
                         Texture tex;
                         tex.id = res->getID();
@@ -260,50 +370,12 @@ public:
                     }
                     
                     if (!mat.specular_texname.empty()) {
-                        TextureResource* res = assetManager.texturePool.getOrLoad(directory + mat.specular_texname);
+                        TextureResource* res = s_assetManager->texturePool.getOrLoad(directory + mat.specular_texname);
                         meshTextures.push_back({res->getID(), "texture_specular", mat.specular_texname});
                     }
                 }
-                meshes.emplace_back(entry.second.vertices, entry.second.indices, meshTextures);
+                meshes.emplace_back(Mesh(entry.second.vertices, entry.second.indices, meshTextures));
             }
         }
-    }
-private:
-    std::vector<Mesh> meshes;
-    std::string directory;
-};
-
-template<typename T>
-class AssetPool {
-public:
-    T* getOrLoad(const std::string& path) {
-        if (pool.find(path) != pool.end()) {
-            return pool[path];
-        }
-        T* resource = new T();
-        resource->load(path);
-        pool[path] = resource;
-        return resource;
-    }
-
-    void cleanup() {
-        for (auto const& [path, resource] : pool) {
-            delete resource;
-        }
-        pool.clear();
-    }   
-
-private:
-    std::unordered_map<std::string, T*> pool;
-};
-
-class AssetManager {
-public:
-    AssetPool<TextureResource> texturePool;
-    AssetPool<ModelResource> modelPool;
-
-    ModelResource* loadModel(const std::string& path) {
-        ModelResource* model = modelPool.getOrLoad(path);
-        return model;
     }
 };

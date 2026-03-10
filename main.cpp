@@ -92,7 +92,7 @@ int main() {
     foundIndex = stringPath.find_last_of(regex);
     if (foundIndex == std::string::npos) {
         std::cout << "Failed to find executable path\n";
-        return;
+        return 1;
     }
     stringPath = stringPath.substr(0, foundIndex);
 
@@ -157,12 +157,17 @@ int main() {
         active.setMat4("view", view);
         
         ParsedScene currentScene = sceneManager.getScene();
+        std::string basePath = stringPath; // keep original base so we don't mutate it repeatedly
         for (auto& sceneObject : currentScene.sceneObjects) {
             glm::mat4 model = glm::mat4(1.0f);
             model = glm::translate(model, sceneObject.transform.pos);
             model = glm::scale(model, sceneObject.transform.scale);
             active.setMat4("model", model);
-            assetManager.modelPool.getOrLoad(stringPath.append(sceneObject.modelPath))->draw(active);
+            // ensure proper separator between base and model path
+            std::string fullModelPath = basePath + "/" + AssetManager::buildModelPath(sceneObject.modelPath);
+            std::cerr << fullModelPath << '\n';
+            //std::cout << assetManager.modelPool.getOrLoad(fullModelPath)->filePath << '\n';
+            assetManager.modelPool.getOrLoad(fullModelPath)->draw(active);
         }
 
         // end of rendering code
