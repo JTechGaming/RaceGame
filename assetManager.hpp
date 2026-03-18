@@ -15,6 +15,8 @@
 
 #define MAX_BONE_INFLUENCE 4
 
+extern unsigned int defaultTexture;
+
 // Forward declarations
 class AssetManager;
 
@@ -125,6 +127,11 @@ public:
         glBindVertexArray(0);
     }  
     void draw(Shader &shader) {
+        if (textures.empty()) {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, defaultTexture);
+            shader.setInt("material.texture_diffuse1", 0);
+        }
         unsigned int diffuseNr = 1;
         unsigned int specularNr = 1;
         for(unsigned int i = 0; i < textures.size(); i++)
@@ -252,6 +259,7 @@ public:
         }
         tinyobj::ObjReaderConfig reader_config;
         reader_config.mtl_search_path = directory;
+        reader_config.triangulate = true;
 
         std::cerr << "Texture directory: " << directory << '\n';
 
@@ -304,18 +312,30 @@ public:
                     }
                     tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
                     Vertex vertex;
+                    vertex.Tangent = glm::vec3(0.0f);
+                    vertex.Bitangent = glm::vec3(0.0f);
+                    for (int i = 0; i < MAX_BONE_INFLUENCE; i++) {
+                        vertex.m_BoneIDs[i] = 0;
+                        vertex.m_Weights[i] = 0.0f;
+                    }
 
                     if (idx.vertex_index >= 0) {
-                        tinyobj::real_t vx = attrib.vertices[3 * size_t(idx.vertex_index) + 0];
-                        tinyobj::real_t vy = attrib.vertices[3 * size_t(idx.vertex_index) + 1];
-                        tinyobj::real_t vz = attrib.vertices[3 * size_t(idx.vertex_index) + 2];
-                        vertex.position = glm::vec3(vx, vy, vz);
+                        size_t vi = size_t(idx.vertex_index);
+                        if (vi >= attrib.vertices.size() / 3) {
+                            std::cerr << "ERROR: vertex_index out of range: " << vi << " max=" << attrib.vertices.size() / 3 << '\n';
+                            vertex.position = glm::vec3(0.0f);
+                        } else {
+                            tinyobj::real_t vx = attrib.vertices[3 * vi + 0];
+                            tinyobj::real_t vy = attrib.vertices[3 * vi + 1];
+                            tinyobj::real_t vz = attrib.vertices[3 * vi + 2];
+                            vertex.position = glm::vec3(vx, vy, vz);
+                        }
                     }
 
                     if (idx.normal_index >= 0 && !attrib.normals.empty()) {
                         size_t ni = size_t(idx.normal_index);
-                        if (3*ni + 2 >= attrib.normals.size()) {
-                            std::cerr << "ERROR: normal_index out of range: " << ni << " normals.size=" << attrib.normals.size() << '\n';
+                        if (ni >= attrib.normals.size() / 3) {
+                            std::cerr << "ERROR: normal_index out of range: " << ni << " max=" << attrib.normals.size() / 3 << '\n';
                             vertex.normal = glm::vec3(0.0f);
                         } else {
                             tinyobj::real_t nx = attrib.normals[3 * ni + 0];
@@ -329,13 +349,13 @@ public:
 
                     if (idx.texcoord_index >= 0 && !attrib.texcoords.empty()) {
                         size_t ti = size_t(idx.texcoord_index);
-                        if (2*ti + 1 >= attrib.texcoords.size()) {
-                            std::cerr << "ERROR: texcoord_index out of range: " << ti << " texcoords.size=" << attrib.texcoords.size() << '\n';
+                        if (ti >= attrib.texcoords.size() / 2) {
+                            std::cerr << "ERROR: texcoord_index out of range: " << ti << " max=" << attrib.texcoords.size() / 2 << '\n';
                             vertex.texCoord = glm::vec2(0.0f);
                         } else {
                             tinyobj::real_t tx = attrib.texcoords[2 * ti + 0];
                             tinyobj::real_t ty = attrib.texcoords[2 * ti + 1];
-                            vertex.texCoord = glm::vec2(tx, ty);
+                            vertex.texCoord = glm::clamp(glm::vec2(tx, 1.0f - ty), 0.0f, 1.0f);
                         }
                     } else {
                         vertex.texCoord = glm::vec2(0.0f);

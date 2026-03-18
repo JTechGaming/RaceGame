@@ -4,7 +4,7 @@ sceneObjects:
   - model: "models/car"
     pawnID: 1      # Anything higher than 0 is a valid ID
     transform: {
-      pos: [ 4.0, 0.0, 0.0 ],
+      pos: [ 4.0, 1.0, 0.0 ],
       rot: [ 0.0, 0.0, 0.0 ],
       scale: [ 1.0, 1.0, 1.0 ]
     }

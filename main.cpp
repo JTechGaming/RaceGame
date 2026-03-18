@@ -40,16 +40,22 @@ float lastX = 400, lastY = 300;
 float pitch = 0.0f, yaw = 0.0f;
 bool firstMouse = true;
 
+float near = 0.001f;
+float far = 1000.0f;
+
 float fov = 90.0f;
 
 unsigned int texture;
+unsigned int defaultTexture;
 
 std::string stringPath;
+std::filesystem::file_time_type lastSceneTime;
 
 AssetManager assetManager{};
 SceneManager sceneManager{};
 
 int main() {
+    ModelResource::setAssetManager(&assetManager);
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -98,7 +104,19 @@ int main() {
 
     sceneManager.findScenes(stringPath);
 
+    lastSceneTime = std::filesystem::last_write_time(sceneManager.getScene().scenePath);
+
     glEnable(GL_DEPTH_TEST);
+    
+    // Create default white texture for meshes without textures
+    glGenTextures(1, &defaultTexture);
+    glBindTexture(GL_TEXTURE_2D, defaultTexture);
+    unsigned char white[] = {255, 255, 255, 255};
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     
     int fbWidth, fbHeight;
     glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
@@ -119,6 +137,14 @@ int main() {
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
     while (!glfwWindowShouldClose(window)) {
+        // Check for scene file changes
+        auto currentSceneTime = std::filesystem::last_write_time(sceneManager.getScene().scenePath);
+        if (currentSceneTime != lastSceneTime) {
+            std::cout << "Scene file changed, reloading..." << std::endl;
+            sceneManager.reloadScene(stringPath);
+            lastSceneTime = currentSceneTime;
+        }
+
         processInput(window); // input
 
         // rendering code
@@ -149,7 +175,7 @@ int main() {
         view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
 
         glm::mat4 projection = glm::mat4(1.0f);
-        projection = glm::perspective(glm::radians(fov), (float)mode->width / (float)mode->height, 0.1f, 100.0f);
+        projection = glm::perspective(glm::radians(fov), (float)mode->width / (float)mode->height, near, far);
         view = glm::translate(view, glm::vec3(0.0f, 0.0f, -3.0f));
 
         Shader &active = showUV ? uvShader : shader;
@@ -163,10 +189,7 @@ int main() {
             model = glm::translate(model, sceneObject.transform.pos);
             model = glm::scale(model, sceneObject.transform.scale);
             active.setMat4("model", model);
-            // ensure proper separator between base and model path
             std::string fullModelPath = basePath + "/" + AssetManager::buildModelPath(sceneObject.modelPath);
-            std::cerr << fullModelPath << '\n';
-            //std::cout << assetManager.modelPool.getOrLoad(fullModelPath)->filePath << '\n';
             assetManager.modelPool.getOrLoad(fullModelPath)->draw(active);
         }
 
