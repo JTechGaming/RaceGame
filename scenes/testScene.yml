@@ -1,7 +1,7 @@
 name: "Test Scene"
 
 sceneObjects:
-  - model: "models/car"
+  - model: "models/car2"
     pawnID: 1      # Anything higher than 0 is a valid ID
     transform: {
       pos: [ 4.0, 1.0, 0.0 ],

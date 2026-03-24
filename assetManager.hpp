@@ -93,14 +93,21 @@ public:
     std::vector<Vertex> vertices;
     std::vector<unsigned int> indices;
     std::vector<Texture> textures;
+    glm::vec3 baseColor = glm::vec3(1.0f);
     
     Mesh() = default;
     
-    Mesh(std::vector<Vertex> vertices, std::vector<unsigned int> indices, std::vector<Texture> textures) 
-        : vertices(std::move(vertices)), indices(std::move(indices)), textures(std::move(textures)) {
+    Mesh(std::vector<Vertex> vertices, std::vector<unsigned int> indices, std::vector<Texture> textures, glm::vec3 baseColor = glm::vec3(1.0f)) 
+        : vertices(std::move(vertices)), indices(std::move(indices)), textures(std::move(textures)), baseColor(baseColor) {
         setupMesh();
     }
     void setupMesh() {
+        if(vertices.empty() || indices.empty()) {
+            std::cerr << "Warning: Mesh::setupMesh called with empty vertex/index buffer. Skipping setup." << std::endl;
+            VAO = VBO = EBO = 0;
+            return;
+        }
+
         glGenVertexArrays(1, &VAO);
         glGenBuffers(1, &VBO);
         glGenBuffers(1, &EBO);
@@ -127,6 +134,9 @@ public:
         glBindVertexArray(0);
     }  
     void draw(Shader &shader) {
+        // Always set material color (fallback from .mtl Kd) before texturing.
+        shader.setVec3("material.baseColor", baseColor);
+
         if (textures.empty()) {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, defaultTexture);
@@ -146,17 +156,22 @@ public:
                 number = std::to_string(specularNr++);
 
             shader.setInt(("material." + name + number).c_str(), i);
-            glBindTexture(GL_TEXTURE_2D, textures[i].id);
+            unsigned int bindId = textures[i].id != 0 ? textures[i].id : defaultTexture;
+            glBindTexture(GL_TEXTURE_2D, bindId);
         }
         glActiveTexture(GL_TEXTURE0);
 
         // draw mesh
+        if (VAO == 0 || indices.empty()) {
+            return;
+        }
+
         glBindVertexArray(VAO);
         glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
     }
 private:
-    unsigned int VAO, VBO, EBO;
+    unsigned int VAO = 0, VBO = 0, EBO = 0;
 };
 
 // Forward declaration of ModelResource
@@ -301,6 +316,13 @@ public:
                 }
                 size_t fv = size_t(shapes[s].mesh.num_face_vertices[f]);
 
+                if (index_offset + fv > shapes[s].mesh.indices.size()) {
+                    std::cerr << "ERROR: shape " << s << " idx overflow at face " << f 
+                              << " (index_offset=" << index_offset << ", fv=" << fv 
+                              << ", indices.size=" << shapes[s].mesh.indices.size() << ")\n";
+                    return;
+                }
+
                 int mat_id = -1;
                 if (f < shapes[s].mesh.material_ids.size()) {
                     mat_id = shapes[s].mesh.material_ids[f];
@@ -309,6 +331,11 @@ public:
                 for (size_t v = 0; v < fv; v++) {
                     if (v == 0 && f % 1000 == 0) {
                         std::cerr << "    face " << f << " starts, fv=" << fv << "\n";
+                    }
+                    if (index_offset + v >= shapes[s].mesh.indices.size()) {
+                        std::cerr << "ERROR: shape " << s << " index out of bounds (" << (index_offset + v)
+                                  << " >= " << shapes[s].mesh.indices.size() << ")\n";
+                        return;
                     }
                     tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
                     Vertex vertex;
@@ -355,7 +382,8 @@ public:
                         } else {
                             tinyobj::real_t tx = attrib.texcoords[2 * ti + 0];
                             tinyobj::real_t ty = attrib.texcoords[2 * ti + 1];
-                            vertex.texCoord = glm::clamp(glm::vec2(tx, 1.0f - ty), 0.0f, 1.0f);
+                            // Do not clamp UV coordinates. OBJ can contain tiling coordinates > 1.
+                            vertex.texCoord = glm::vec2(tx, 1.0f - ty);
                         }
                     } else {
                         vertex.texCoord = glm::vec2(0.0f);
@@ -373,9 +401,13 @@ public:
             for (auto &entry : groups) {
                 int mat_id = entry.first;
                 std::vector<Texture> meshTextures;
+                glm::vec3 baseColor(1.0f);
 
                 if (mat_id >= 0 && mat_id < (int)materials.size()) {
                     const auto& mat = materials[mat_id];
+
+                    // Save diffuse color from material (Kd) as fallback.
+                    baseColor = glm::vec3(mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]);
 
                     if (!mat.diffuse_texname.empty()) {
                         std::string fullPath = directory + mat.diffuse_texname;
@@ -394,7 +426,7 @@ public:
                         meshTextures.push_back({res->getID(), "texture_specular", mat.specular_texname});
                     }
                 }
-                meshes.emplace_back(Mesh(entry.second.vertices, entry.second.indices, meshTextures));
+                meshes.emplace_back(Mesh(entry.second.vertices, entry.second.indices, meshTextures, baseColor));
             }
         }
     }
