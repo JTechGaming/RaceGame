@@ -1,6 +1,7 @@
 #pragma once
 
 #include "shader.h"
+#include "transform.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -248,6 +249,17 @@ public:
         for (unsigned int i=0; i<meshes.size(); i++) {
             meshes[i].draw(shader);
         }
+    }
+
+    void draw(Shader &shader, const Transform &transform) {
+        glm::mat4 model = glm::mat4(1.0f);
+        model = glm::translate(model, transform.pos);
+        model = glm::rotate(model, transform.rot.x, glm::vec3(1.0f, 0.0f, 0.0f));
+        model = glm::rotate(model, transform.rot.y, glm::vec3(0.0f, 1.0f, 0.0f));
+        model = glm::rotate(model, transform.rot.z, glm::vec3(0.0f, 0.0f, 1.0f));
+        model = glm::scale(model, transform.scale);
+        shader.setMat4("model", model);
+        draw(shader);
     }
 
     void load(const std::string& path) override {

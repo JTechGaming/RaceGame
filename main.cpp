@@ -20,30 +20,28 @@
 #include <iostream>
 #include <filesystem>
 
+#include "game.hpp"
+#include "camera.hpp"
+
 #define WIREFRAME_MODE false
 
 void processInput(GLFWwindow *window);
 void framebufferSizeCallback(GLFWwindow* window, int width, int height);
-void drawFrame(Shader& shader);
 void mouseCallback(GLFWwindow* window, double xpos, double ypos);
 void scrollCallback(GLFWwindow* window, double xpos, double ypos);
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 
-glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 3.0f);
 glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
-glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
 
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
-
-float lastX = 400, lastY = 300;
-float pitch = 0.0f, yaw = 0.0f;
-bool firstMouse = true;
 
 float near = 0.001f;
 float far = 1000.0f;
 
 float fov = 90.0f;
+
+Camera* currentCamera = nullptr;
 
 unsigned int texture;
 unsigned int defaultTexture;
@@ -53,6 +51,9 @@ std::filesystem::file_time_type lastSceneTime;
 
 AssetManager assetManager{};
 SceneManager sceneManager{};
+
+RaceGame game;
+IGame& gameRef = game;
 
 int main() {
     ModelResource::setAssetManager(&assetManager);
@@ -135,6 +136,11 @@ int main() {
     bool prevCState = false;
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    
+    game.OnInit(&assetManager, &sceneManager, stringPath);
+    game.setWindow(window);
+
+    currentCamera = &game.getCamera();
 
     while (!glfwWindowShouldClose(window)) {
         // Check for scene file changes
@@ -145,6 +151,14 @@ int main() {
             lastSceneTime = currentSceneTime;
         }
 
+        float currentFrame = glfwGetTime();
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
+        game.OnTick(deltaTime);
+
+        game.getCamera().tick();
+
         processInput(window); // input
 
         // rendering code
@@ -154,10 +168,6 @@ int main() {
         if (WIREFRAME_MODE) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         }
-
-        float currentFrame = glfwGetTime();
-        deltaTime = currentFrame - lastFrame;
-        lastFrame = currentFrame;  
 
         // toggle UV debug visualization with U key (edge detect)
         bool uPressed = glfwGetKey(window, GLFW_KEY_U) == GLFW_PRESS;
@@ -172,16 +182,17 @@ int main() {
         if (showUV) uvShader.use(); else shader.use();
 
         glm::mat4 view;
-        view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+        view = glm::lookAt(game.getCamera().getCameraPos(), game.getCamera().getCameraPos() + game.getCamera().getCameraFront(), game.getCamera().getCameraUp());
 
         glm::mat4 projection = glm::mat4(1.0f);
         projection = glm::perspective(glm::radians(fov), (float)mode->width / (float)mode->height, near, far);
-        view = glm::translate(view, glm::vec3(0.0f, 0.0f, -3.0f));
 
         Shader &active = showUV ? uvShader : shader;
         active.setMat4("projection", projection);
         active.setMat4("view", view);
         
+        game.OnPreRender(active, deltaTime);
+
         ParsedScene currentScene = sceneManager.getScene();
         std::string basePath = stringPath; // keep original base so we don't mutate it repeatedly
         for (auto& sceneObject : currentScene.sceneObjects) {
@@ -193,6 +204,8 @@ int main() {
             assetManager.modelPool.getOrLoad(fullModelPath)->draw(active);
         }
 
+        game.OnPostRender(active, deltaTime);
+
         // end of rendering code
 
         // poll and swap
@@ -200,12 +213,10 @@ int main() {
         glfwPollEvents();
     }
 
+    game.OnShutdown();
+
     glfwTerminate();
     return 0;
-}
-
-void drawFrame(Shader& shader) {
-    
 }
 
 void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
@@ -217,57 +228,18 @@ void processInput(GLFWwindow *window) {
 
     if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        cameraPos += cameraSpeed * cameraFront;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        cameraPos -= cameraSpeed * cameraFront;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
-        cameraPos -= cameraSpeed * cameraUp;
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
-        cameraPos += cameraSpeed * cameraUp;
 }
 
 void mouseCallback(GLFWwindow* window, double xpos, double ypos) {
-    if (firstMouse) {
-        lastX = xpos;
-        lastY = ypos;
-        firstMouse = false;
+    if (currentCamera) {
+        currentCamera->processMouse(xpos, ypos);
     }
-    
-    float xoffset = xpos - lastX;
-    float yoffset = lastY - ypos;
-    lastX = xpos;
-    lastY = ypos;
-
-    const float sensitivity = 0.1f;
-    xoffset *= sensitivity;
-    yoffset *= sensitivity;
-
-    yaw += xoffset;
-    pitch += yoffset;
-
-    if(pitch > 89.0f)
-        pitch =  89.0f;
-    if(pitch < -89.0f)
-        pitch = -89.0f;
-
-    glm::vec3 direction;
-    direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-    direction.y = sin(glm::radians(pitch));
-    direction.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-    cameraFront = glm::normalize(direction);
 }
 
 void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
-    fov -= (float)yoffset;
-    if (fov < 5.0f)
-        fov = 5.0f;
-    if (fov > 120.0f)
-        fov = 120.0f; 
+    if (currentCamera) {
+        currentCamera->updateOrbitRadius((float)yoffset);
+    }
 }
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
