@@ -1,340 +1,232 @@
+#pragma once
+
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include <vector>
+#include <algorithm>
 
-struct Object {
-    glm::vec3 position;
-    glm::vec3 velocity;
-    glm::vec3 force;
-    float mass;
+struct AABB {
+    glm::vec3 center;
+    glm::vec3 halfExtents;
+    AABB(glm::vec3 c = glm::vec3(0), glm::vec3 he = glm::vec3(1)) : center(c), halfExtents(he) {}
+    glm::vec3 getMin() const { return center - halfExtents; }
+    glm::vec3 getMax() const { return center + halfExtents; }
 };
 
-class PhysicsScene {
-private:
-    std::vector<Object*> _objects;
-    glm::vec3 _gravity = glm::vec3(0, -9.81f, 0);
-public:
-    void SpawnObject(Object* object) { }
-    void DeleteObject(Object* object) { }
+struct OBB {
+    glm::vec3 center;
+    glm::vec3 halfExtents;
+    glm::mat3 rotation; 
 
-    void Tick(float dt) {
-        for (Object* obj : _objects) {
-            obj->force += obj->mass * _gravity;
-            obj->velocity += obj->force / obj->mass * dt;
-            obj->position += obj->velocity * dt;
-            obj->force = glm::vec3(0, 0, 0);
-        }
+    std::vector<glm::vec3> getVertices() const {
+        std::vector<glm::vec3> v(8);
+        glm::vec3 r = rotation[0] * halfExtents.x;
+        glm::vec3 u = rotation[1] * halfExtents.y;
+        glm::vec3 f = rotation[2] * halfExtents.z;
+
+        v[0] = center - r - u - f; v[1] = center + r - u - f;
+        v[2] = center - r + u - f; v[3] = center + r + u - f;
+        v[4] = center - r - u + f; v[5] = center + r - u + f;
+        v[6] = center - r + u + f; v[7] = center + r + u + f;
+        return v;
     }
 };
 
-struct CollisionPoints {
-    glm::vec3 A;
-    glm::vec3 B;
+struct Wheel {
+    glm::vec3 connectionPoint;
+    float suspensionRestLength = 0.5f;
+    float springStiffness = 5000.0f; // Increased for heavy cars
+    float damperStiffness = 500.0f;
+    float wheelRadius = 0.3f;
+    float friction = 0.8f;
+    float lastCompression = 0.0f;
+};
+
+struct RigidBody {
+    glm::vec3 m_position;
+    glm::quat m_orientation;
+    glm::vec3 m_velocity;
+    glm::vec3 m_angularVelocity;
+    
+    float m_mass;
+    float m_inverseMass;
+    glm::mat3 m_inertiaTensorInv;
+    OBB m_obb;
+
+    RigidBody(glm::vec3 pos, glm::vec3 extents, float mass) 
+        : m_position(pos), m_orientation(glm::vec3(0)), m_velocity(0), 
+          m_angularVelocity(0), m_mass(mass) {
+        
+        m_inverseMass = (mass > 0) ? 1.0f / mass : 0.0f;
+        m_obb.center = pos;
+        m_obb.halfExtents = extents;
+        m_obb.rotation = glm::mat3_cast(m_orientation);
+
+        // Basic moments of inertia for a box
+        float x2 = (extents.x * 2) * (extents.x * 2);
+        float y2 = (extents.y * 2) * (extents.y * 2);
+        float z2 = (extents.z * 2) * (extents.z * 2);
+        float ix = (1.0f / 12.0f) * mass * (y2 + z2);
+        float iy = (1.0f / 12.0f) * mass * (x2 + z2);
+        float iz = (1.0f / 12.0f) * mass * (x2 + y2);
+        m_inertiaTensorInv = glm::inverse(glm::mat3(ix, 0, 0, 0, iy, 0, 0, 0, iz));
+    }
+
+    void updateTransform() {
+        m_obb.center = m_position;
+        m_obb.rotation = glm::mat3_cast(m_orientation);
+    }
+};
+
+struct CollisionInfo {
+    bool colliding;
     glm::vec3 normal;
-    glm::vec3 depth;
-    glm::vec3 hasCollision;
+    float penetration;
 };
 
-struct Transform {
-    glm::vec3 position;
-    glm::vec3 rotation;
-    glm::vec3 scale;
-};
-
-struct Collider {
-    virtual glm::vec3 FindFurthestPoint(glm::vec3 direction) const = 0;
-};
-
-struct MeshCollider : Collider {
-private:
-    std::vector<glm::vec3> _vertices;
+class RacingVehicle {
 public:
-    glm::vec3 FindFurthestPoint(glm::vec3 direction) const override {
-        glm::vec3 maxPoint;
-        float maxDistance = -FLT_MAX;
+    RigidBody* body;
+    std::vector<Wheel> wheels;
 
-        for (glm::vec3 vertex : _vertices) {
-            float distance = glm::dot(vertex, direction);
-            if (distance > maxDistance) {
-                maxDistance = distance;
-                maxPoint = vertex;
-            }
-        }
+    void updateSuspension(float dt, const std::vector<AABB*>& world) {
+        for (auto& wheel : wheels) {
+            glm::vec3 worldWheelPos = body->m_position + (body->m_obb.rotation * wheel.connectionPoint);
+            glm::vec3 rayDir = body->m_obb.rotation[1] * -1.0f; 
 
-        return maxPoint;
-    }
-};
+            float distance = castRay(worldWheelPos, rayDir, wheel.suspensionRestLength + wheel.wheelRadius, world);
 
-glm::vec3 Support(const Collider& A, const Collider& B, glm::vec3 direction) {
-    return A.FindFurthestPoint(direction) - B.FindFurthestPoint(-direction);
-}
+            if (distance < wheel.suspensionRestLength + wheel.wheelRadius) {
+                float compression = (wheel.suspensionRestLength + wheel.wheelRadius) - distance;
+                float springForce = compression * wheel.springStiffness;
+                float suspensionVelocity = (compression - wheel.lastCompression) / dt;
+                float damperForce = suspensionVelocity * wheel.damperStiffness;
+                wheel.lastCompression = compression;
 
-struct Simplex {
-private:
-    std::array<glm::vec3, 4> _points;
-    int _size;
-public:
-    Simplex() : _size(0) {}
+                glm::vec3 totalUpForce = rayDir * -(springForce + damperForce);
+                applyForceAtPoint(totalUpForce, worldWheelPos);
 
-    Simplex& operator=(std::initializer_list<glm::vec3> list) {
-        _size = 0;
-        for (glm::vec3 point : list) {
-            _points[_size++] = point;
-        }
-        return *this;
-    }
-
-    void push_front(glm::vec3 point) {
-        _points = { point, _points[0], _points[1], _points[2] };
-        _size = std::min(_size + 1, 4);
-    }
-
-    glm::vec3& operator[](int i) { return _points[i]; }
-    size_t size() const { return _size; }
-
-    auto begin() const { return _points.begin(); }
-    auto end() const { return _points.end() - (4 - _size); }
-};
-
-bool SameDirection(const glm::vec3& direction, const glm::vec3& ao) {
-    return glm::dot(direction, ao) > 0;
-}
-
-bool Line(Simplex& points, glm::vec3 direction) {
-    glm::vec3 a = points[0];
-    glm::vec3 b = points[1];
-
-    glm::vec3 ab = b-a;
-    glm::vec3 ao = -a;
-
-    if (SameDirection(ab, ao)) {
-        direction = glm::cross(glm::cross(ab, ao), ab);
-    } else {
-        points = { a };
-        direction = ao;
-    }
-    
-    return false;
-}
-
-bool Triangle(Simplex& points, glm::vec3& direction) {
-    glm::vec3 a = points[0];
-    glm::vec3 b = points[1];
-    glm::vec3 c = points[2];
-
-    glm::vec3 ab = b-a;
-    glm::vec3 ac = c-a;
-    glm::vec3 ao = -a;
-    glm::vec3 abc = glm::cross(ab, ac);
-
-    if (SameDirection(glm::cross(abc, ac), ao)) {
-        if (SameDirection(ac, ao)) {
-            points = { a, c };
-            direction = glm::cross(glm::cross(ac, ao), ac);
-        } else {
-            return Line(points = { a, b }, direction);
-        }
-    } else {
-        if (SameDirection(glm::cross(ab, abc), ao)) {
-            return Line(points = { a, b }, direction);
-        } else {
-            if (SameDirection(abc, ao)) {
-                direction = abc;
-            } else {
-                points = {a, c, b };
-                direction = -abc;
+                // Grip
+                glm::vec3 wheelVelocity = body->m_velocity + glm::cross(body->m_angularVelocity, worldWheelPos - body->m_position);
+                glm::vec3 sideDir = body->m_obb.rotation[0]; 
+                float sideVel = glm::dot(wheelVelocity, sideDir);
+                glm::vec3 frictionImpulse = -sideDir * (sideVel * wheel.friction * body->m_mass * dt); // Force instead of impuls
+                applyForceAtPoint(frictionImpulse, worldWheelPos);
             }
         }
     }
 
-    return false;
-}
-
-bool Tetrahedron(Simplex& points, glm::vec3& direction) {
-    glm::vec3 a = points[0];
-    glm::vec3 b = points[1];
-    glm::vec3 c = points[2];
-    glm::vec3 d = points[3];
-
-    glm::vec3 ab = b-a;
-    glm::vec3 ac = c-a;
-    glm::vec3 ad = d-a;
-    glm::vec3 ao = -a;
-
-    glm::vec3 abc = glm::cross(ab, ac);
-    glm::vec3 acd = glm::cross(ac, ad);
-    glm::vec3 adb = glm::cross(ad, ab);
-
-    if (SameDirection(abc, ao)) {
-        return Triangle(points = {a, b, c }, direction);
+    void applyForceAtPoint(glm::vec3 force, glm::vec3 worldPoint) {
+        body->m_velocity += (force * body->m_inverseMass);
+        glm::vec3 r = worldPoint - body->m_position;
+        body->m_angularVelocity += body->m_inertiaTensorInv * glm::cross(r, force);
     }
 
-    if (SameDirection(acd, ao)) {
-        return Triangle(points = {a, c, d }, direction);
+    float castRay(glm::vec3 origin, glm::vec3 dir, float maxDist, const std::vector<AABB*>& world) {
+        if (origin.y < maxDist) return origin.y; 
+        return maxDist + 1.0f;
     }
+};
 
-    if (SameDirection(adb, ao)) {
-        return Triangle(points = {a, d, b }, direction);
-    }
-
-    return true;
-}
-
-bool NextSimplex(Simplex& points, glm::vec3& direction) {
-    switch(points.size()) {
-        case 2: return Line(points, direction);
-        case 3: return Triangle(points, direction);
-        case 4: return Tetrahedron(points, direction);
+// Collision Detection (SAT)
+inline void projectOBB(const OBB& box, const glm::vec3& axis, float& min, float& max) {
+    auto vertices = box.getVertices();
+    min = max = glm::dot(vertices[0], axis);
+    for (int i = 1; i < 8; i++) {
+        float p = glm::dot(vertices[i], axis);
+        min = std::min(min, p);
+        max = std::max(max, p);
     }
 }
 
-bool runGJKCheck(const Collider& A, const Collider& B) {
-    glm::vec3 support = Support(A, B, glm::vec3(1, 0, 0));
-    Simplex points;
-    points.push_front(support);
-    glm::vec3 direction = -support; // new dir towards origin
-    
-    while(true) {
-        support = Support(A, B, direction);
+inline CollisionInfo checkOBBCollision(const OBB& a, const OBB& b) {
+    CollisionInfo result{false, glm::vec3(0), FLT_MAX};
+    glm::vec3 axes[6] = { a.rotation[0], a.rotation[1], a.rotation[2], b.rotation[0], b.rotation[1], b.rotation[2] };
 
-        if (glm::dot(support, direction) <= 0) {
-            return false;
-        }
-
-        points.push_front(support);
-
-        if (NextSimplex(points, direction)) {
-            return true;
-        }
+    for (int i=0; i<6; i++) {
+        glm::vec3 axis = glm::normalize(axes[i]);
+        float minA, maxA, minB, maxB;
+        projectOBB(a, axis, minA, maxA);
+        projectOBB(b, axis, minB, maxB);
+        float overlap = std::max(0.0f, std::min(maxA, maxB) - std::max(minA, minB));
+        if (overlap <= 0.0f) return {false, glm::vec3(0), 0.0f};
+        if (overlap < result.penetration) { result.penetration = overlap; result.normal = axis; }
     }
+    if (glm::dot(b.center - a.center, result.normal) < 0) result.normal = -result.normal;
+    result.colliding = true;
+    return result;
 }
 
-std::pair<std::vector<glm::vec4>, size_t> GetFaceNormals(
-    const std::vector<glm::vec3>& polytope, const std::vector<size_t>& faces
-) {
-    std::vector<glm::vec4> normals;
-    size_t minTriangle = 0;
-    float minDistance = FLT_MAX;
-
-    for (size_t i = 0; i < faces.size(); i += 3) {
-        glm::vec3 a = polytope[faces[i]];
-        glm::vec3 b = polytope[faces[i+1]];
-        glm::vec3 c = polytope[faces[i+2]];
-        glm::vec3 normal = glm::normalize(glm::cross(b-a, c-a));
-        float distance = glm::dot(normal, a);
-        if (distance < 0) {
-            normal *= -1;
-            distance *= -1;
-        }
-
-        normals.emplace_back(normal, distance);
-
-        if (distance < minDistance) {
-            minTriangle = i / 3;
-            minDistance = distance;
-        }
-    }
-
-    return { normals, minTriangle };
+inline CollisionInfo checkOBBvsAABB(const OBB& a, const AABB& b) {
+    OBB bAsObb;
+    bAsObb.center = b.center;
+    bAsObb.halfExtents = b.halfExtents;
+    bAsObb.rotation = glm::mat3(1.0f); // Identity matrix = no rotation
+    return checkOBBCollision(a, bAsObb);
 }
 
-void AddIfUniqueEdge(
-    std::vector<std::pair<size_t, size_t>>& edges,
-    const std::vector<size_t>& faces,
-    size_t a, size_t b
-) {
-    auto reverse = std::find(
-        edges.begin(),
-        edges.end(),
-        std::make_pair(faces[b], faces[a])
-    );
-    
-    if (reverse != edges.end()) {
-        edges.erase(reverse);
-    } else {
-        edges.emplace_back(faces[a], faces[b]);
-    }
-}
+// Physics Engine
+class SimplePhysicsEngine {
+public:
+    std::vector<RigidBody*> bodies;
+    std::vector<AABB*> staticColliders;
+    glm::vec3 gravity{0, -9.81f, 0};
+    const int SUB_STEPS = 8;
 
-CollisionPoints EPA(const Simplex& simplex, Collider& A, Collider& B) {
-    std::vector<glm::vec3> polytope(simplex.begin(), simplex.end());
-    std::vector<size_t> faces = {
-        0, 1, 2,
-        0, 3, 1,
-        0, 2, 3,
-        1, 3, 2
-    };
+    void addBody(RigidBody* body) { bodies.push_back(body); }
+    void addStaticCollider(AABB* collider) { staticColliders.push_back(collider); }
 
-    auto [normals, minFace] = GetFaceNormals(polytope, faces);
+    void step(float dt) {
+        float subDt = dt / (float)SUB_STEPS;
+        for (int s = 0; s < SUB_STEPS; s++) {
+            for (auto b : bodies) {
+                for (auto staticCollider : staticColliders) {
+                    auto col = checkOBBvsAABB(b->m_obb, *staticCollider);
+                    if (col.colliding) {
+                        // push car up and stop vertical velocity
+                        b->m_position += col.normal * col.penetration;
+                        b->updateTransform();
 
-    glm::vec3 minNormal;
-    float minDistance = FLT_MAX;
-
-    while (minDistance == FLT_MAX) {
-        minNormal = normals[minFace].xyz();
-        minDistance = normals[minFace].w;
-
-        glm::vec3 support = Support(A, B, minNormal);
-        float sDistance = glm::dot(minNormal, support);
-
-        if (abs(sDistance - minDistance) > 0.001f) {
-            minDistance = FLT_MAX;
-
-            std::vector<std::pair<size_t, size_t>> uniqueEdges;
-            for (size_t i = 0; i < normals.size(); i++) {
-                if (SameDirection(normals[i], support)) {
-                    size_t f = i*3;
-                    AddIfUniqueEdge(uniqueEdges, faces, f, f+1);
-                    AddIfUniqueEdge(uniqueEdges, faces, f+1, f+2);
-                    AddIfUniqueEdge(uniqueEdges, faces, f+2, f);
-
-                    faces[f+2] = faces.back();
-                    faces.pop_back();
-                    faces[f+1] = faces.back();
-                    faces.pop_back();
-                    faces[f] = faces.back();
-                    faces.pop_back();
-
-                    normals[i] = normals.back();
-                    normals.pop_back();
-
-                    i--;
+                        float velDot = glm::dot(b->m_velocity, col.normal);
+                        if (velDot < 0) {
+                            b->m_velocity -= col.normal * velDot;
+                        }
+                    }
+                }
+                if (b->m_mass <= 0) continue;
+                b->m_velocity += gravity * subDt;
+                b->m_position += b->m_velocity * subDt;
+                glm::quat q = glm::quat(0, b->m_angularVelocity * subDt);
+                b->m_orientation += (q * 0.5f) * b->m_orientation;
+                b->m_orientation = glm::normalize(b->m_orientation);
+                b->updateTransform();
+            }
+            for (size_t i = 0; i < bodies.size(); i++) {
+                for (size_t j = i + 1; j < bodies.size(); j++) {
+                    auto col = checkOBBCollision(bodies[i]->m_obb, bodies[j]->m_obb);
+                    if (col.colliding) resolveCollision(bodies[i], bodies[j], col);
                 }
             }
-
-            std::vector<size_t> newFaces;
-            for (auto[edgeIndex1, edgeIndex2] : uniqueEdges) {
-                newFaces.push_back(edgeIndex1);
-                newFaces.push_back(edgeIndex2);
-                newFaces.push_back(polytope.size());
-            }
-
-            polytope.push_back(support);
-
-            auto[newNormals, newMinFace] = GetFaceNormals(polytope, newFaces);
-
-            float oldMinDistance = FLT_MAX;
-            for (size_t i = 0; i < normals.size(); i++) {
-                if (normals[i].w < oldMinDistance) {
-                    oldMinDistance = normals[i].w;
-                    minFace = i;
-                }
-            }
-
-            if (newNormals[newMinFace].w < oldMinDistance) {
-                minFace = newMinFace + normals.size();
-            }
-
-            faces.insert(faces.end(), newFaces.begin(), newFaces.end());
-            normals.insert(normals.end(), newNormals.begin(), newNormals.end());
         }
     }
 
-    CollisionPoints points;
-    points.normal = minNormal;
-    points.penetrationDepth = minDistance + 0.001f;
-    points.hasCollision = true;
-
-    return points;
-}
+private:
+    void resolveCollision(RigidBody* a, RigidBody* b, CollisionInfo col) {
+        float totalInvMass = a->m_inverseMass + b->m_inverseMass;
+        if (totalInvMass == 0) return;
+        glm::vec3 rv = b->m_velocity - a->m_velocity;
+        float velAlongNormal = glm::dot(rv, col.normal);
+        if (velAlongNormal > 0) return;
+        float e = 0.2f;
+        float j = -(1.0f + e) * velAlongNormal / totalInvMass;
+        glm::vec3 impulse = j * col.normal;
+        a->m_velocity -= impulse * a->m_inverseMass;
+        b->m_velocity += impulse * b->m_inverseMass;
+        // Positionele correctie
+        glm::vec3 correction = (std::max(col.penetration - 0.01f, 0.0f) / totalInvMass) * 0.2f * col.normal;
+        a->m_position -= correction * a->m_inverseMass;
+        b->m_position += correction * b->m_inverseMass;
+    }
+};

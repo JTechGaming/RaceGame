@@ -247,4 +247,7 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
         std::cout << "Hotswapping current scene" << '\n';
         sceneManager.reloadScene(stringPath);   
     }
+    if (key == GLFW_KEY_P && action == GLFW_PRESS) {
+        gameRef.setDebug(!gameRef.getDebug());
+    }
 }

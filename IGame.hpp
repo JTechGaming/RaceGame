@@ -18,6 +18,9 @@ public:
     virtual void OnPreRender(Shader& shader, float deltaTime) = 0;
     virtual void OnPostRender(Shader& shader, float deltaTime) = 0;
 
+    virtual void setDebug(bool debug) = 0;
+    virtual bool getDebug() const = 0;
+
     // Input helper functions
     void setWindow(GLFWwindow* window) { m_window = window; }
 
