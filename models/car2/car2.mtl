@@ -10,6 +10,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
+map_Kd Vehicle_Exterior_mm_badges.png
 
 newmtl Vehicle_Exterior_mm_cab
 Ns 250.000000
@@ -20,6 +21,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
+map_Kd Vehicle_Exterior_mm_cab.png
 
 newmtl Vehicle_Exterior_mm_chassis
 Ns 250.000000
@@ -30,6 +32,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
+map_Kd Vehicle_Exterior_mm_chassis.png
 
 newmtl Vehicle_Exterior_mm_ext
 Ns 250.000000
@@ -40,6 +43,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
+map_Kd Vehicle_Exterior_mm_ext.png
 
 newmtl Vehicle_Exterior_mm_lights
 Ns 250.000000
@@ -50,6 +54,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
+map_Kd Vehicle_Exterior_mm_lights.png
 
 newmtl Vehicle_Exterior_mm_misc
 Ns 250.000000
@@ -60,6 +65,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
+map_Kd Vehicle_Exterior_mm_misc.png
 
 newmtl Vehicle_Exterior_mm_rotor
 Ns 250.000000
@@ -70,6 +76,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
+map_Kd Vehicle_Exterior_mm_rotor.png
 
 newmtl Vehicle_Exterior_mm_tyre
 Ns 250.000000
@@ -80,6 +87,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
+map_Kd Vehicle_Exterior_mm_tyre.png
 
 newmtl Vehicle_Exterior_mm_wheel
 Ns 250.000000
@@ -90,6 +98,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
+map_Kd Vehicle_Exterior_mm_wheel.png
 
 newmtl Vehicle_Exterior_mm_windows
 Ns 1000.000000
@@ -100,3 +109,4 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
+map_Kd Vehicle_Exterior_mm_windows.png

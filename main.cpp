@@ -142,6 +142,8 @@ int main() {
     game.OnInit(&assetManager, &sceneManager, stringPath);
     game.setWindow(window);
 
+    game.setDebug(true);
+
     currentCamera = &game.getCamera();
 
     while (!glfwWindowShouldClose(window)) {

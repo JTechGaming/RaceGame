@@ -8,10 +8,7 @@
 
 class IGame {
 public:
-    virtual void OnInit(AssetManager* assetManager, SceneManager* sceneManager, std::string basePath) {
-        m_assetManager = assetManager;
-        m_sceneManager = sceneManager;
-    }
+    virtual void OnInit(AssetManager* assetManager, SceneManager* sceneManager, std::string basePath) = 0;
     virtual void OnShutdown() = 0;
 
     virtual void OnTick(float deltaTime) = 0;
@@ -54,7 +51,5 @@ public:
     }
 
 private:
-    AssetManager* m_assetManager;
-    SceneManager* m_sceneManager;
     GLFWwindow* m_window = nullptr;
 };

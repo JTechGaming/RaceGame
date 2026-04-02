@@ -5,6 +5,8 @@
 #include "camera.hpp"
 #include "physicsEngine.hpp"
 
+#include "mathUtils.hpp"
+
 struct CarInput {
     bool forward = false;
     bool backward = false;
@@ -16,6 +18,9 @@ struct CarInput {
 class RaceGame : public IGame {
 public:
     void OnInit(AssetManager* assetManager, SceneManager* sceneManager, std::string basePath) override {
+        m_assetManager = assetManager;
+        m_sceneManager = sceneManager;
+
         objects.reserve(3);
 
         Object car{};
@@ -46,6 +51,8 @@ public:
         // Thin slab floor top surface at y=0
         AABB* floorCollider = new AABB(glm::vec3(0.0f, -0.05f, 0.0f), glm::vec3(100.0f, 0.05f, 100.0f));
         physicsEngine.addStaticCollider(floorCollider);
+
+        debugCube = m_assetManager->loadModel(AssetManager::buildModelPath("models/cube"));
     }
 
     void OnShutdown() override {}
@@ -66,6 +73,8 @@ public:
             } else {
                 // AI logic
                 // IGOORRRRR
+
+                glm::vec3 bot1DestinationPoint = m_sceneManager->getScene().trackSpline._points[bot1NextSplineIndex];
             }
 
             // Physics
@@ -75,7 +84,7 @@ public:
 
             const float engineForce = 15000.0f;
             const float turnTorque  = 20000.0f;
-            const float maxSpeed    = 30.0f;
+            const float maxSpeed    = 50.0f;
             float forwardSpeed = glm::dot(rb->m_velocity, forward);
 
             if (rb->m_onGround) {
@@ -129,6 +138,14 @@ public:
     void OnPostRender(Shader& shader, float deltaTime) override {
         for (auto& el : objects)
             el.second.model->draw(shader, el.second.modelTransform);
+
+        if(m_debug) {
+            for (glm::vec3 point : m_sceneManager->getScene().trackSpline._points) {
+                shader.setVec3("material.baseColor", glm::vec3(1.0f, 0.0f, 0.0f)); // red for debug
+                Transform debugTransform{point, glm::vec3(0.0f), glm::vec3(0.1f)};
+                debugCube->draw(shader, debugTransform);
+            }
+        }
     }
 
     void setDebug(bool debug) override { m_debug = debug; }
@@ -137,11 +154,19 @@ public:
     Camera& getCamera() { return camera; }
 
 private:
+    AssetManager* m_assetManager;
+    SceneManager* m_sceneManager;
+
     std::unordered_map<std::string, Object> objects;
     std::unordered_map<std::string, RigidBody*> bodyMap;
     SimplePhysicsEngine physicsEngine;
     Camera camera;
     bool m_debug = false;
+
+    ModelResource* debugCube = nullptr;
+
+    uint16_t bot1NextSplineIndex = 0;
+    uint16_t bot2NextSplineIndex = 0;
 
     std::unordered_map<std::string, RacingVehicle> vehicles;
 };

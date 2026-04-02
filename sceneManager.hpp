@@ -11,6 +11,8 @@
 
 #include "transform.hpp"
 
+#include "mathUtils.hpp"
+
 struct SceneObject {
     std::string modelPath;
     uint8_t pawnID = 0;
@@ -22,6 +24,8 @@ struct ParsedScene {
     std::string scenePath;
     std::vector<SceneObject> sceneObjects;
     uint8_t startingPawn;
+
+    Spline trackSpline = {std::vector<glm::vec3>()};
 };
 
 class SceneManager {
@@ -170,6 +174,31 @@ public:
                 uint8_t startingPawn = std::stoi(std::string(v.data(), v.len));
                 scene.startingPawn = startingPawn;
             }
+
+            std::vector<glm::vec3> splinePoints;
+            if(root.has_child("trackSpline")) {
+                NodeRef objs = root["trackSpline"];
+                splinePoints.reserve(objs.num_children());
+                for(auto it = objs.begin(); it != objs.end(); ++it) {
+                    if((*it).has_child("pos")) {
+                        NodeRef t = (*it)["pos"];
+                        float x = 0, y = 0, z = 0;
+                        if(t.num_children() >= 3) {
+                            c4::csubstr vx = t[0].val();
+                            c4::csubstr vy = t[1].val();
+                            c4::csubstr vz = t[2].val();
+                            x = safe_stof(vx);
+                            y = safe_stof(vy);
+                            z = safe_stof(vz);
+                        } else {
+                            std::cerr << "Warning: pos in spline does not have 3 elements\n";
+                        }
+                        splinePoints.emplace_back(glm::vec3(x, y, z));
+                    }
+                }
+
+            }
+            scene.trackSpline = Spline(std::move(splinePoints));
 
             loadScene(std::move(scene));
         } catch (const std::exception& e) {
