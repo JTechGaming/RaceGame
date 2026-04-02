@@ -8,6 +8,7 @@ int SoundEngine::init() {
     if (result != MA_SUCCESS) {
         return result; // Failed to initialize the engine.
     }
+    return result;
 }
 
 void SoundEngine::playSound(ma_sound *sound) {

@@ -36,8 +36,8 @@ glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
-float near = 0.001f;
-float far = 1000.0f;
+float nearPlane = 0.001f;
+float farPlane = 1000.0f;
 
 float fov = 90.0f;
 
@@ -96,9 +96,7 @@ int main() {
 
     // Convert to string and get scene path
     std::copy(path, path + length, std::back_inserter(stringPath));
-    char regex = '/';
-    size_t foundIndex;
-    foundIndex = stringPath.find_last_of(regex);
+    size_t foundIndex = stringPath.find_last_of("/\\");
     if (foundIndex == std::string::npos) {
         std::cout << "Failed to find executable path\n";
         return 1;
@@ -189,7 +187,7 @@ int main() {
         view = glm::lookAt(game.getCamera().getCameraPos(), game.getCamera().getCameraPos() + game.getCamera().getCameraFront(), game.getCamera().getCameraUp());
 
         glm::mat4 projection = glm::mat4(1.0f);
-        projection = glm::perspective(glm::radians(fov), (float)mode->width / (float)mode->height, near, far);
+        projection = glm::perspective(glm::radians(fov), (float)mode->width / (float)mode->height, nearPlane, farPlane);
 
         Shader &active = showUV ? uvShader : shader;
         active.setMat4("projection", projection);

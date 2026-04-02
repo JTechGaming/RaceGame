@@ -9,6 +9,15 @@
             "presentation": {
                 "reveal": "always"
             }
+        },
+        {
+            "label": "Build & Run (Windows)",
+            "type": "shell",
+            "command": "gcc -Ic:/Users/jaspe/RaceGame/libs -c c:/Users/jaspe/RaceGame/libs/whereami.c -o c:/Users/jaspe/RaceGame/libs/whereami.o ; g++ -std=c++20 -Ic:/Users/jaspe/RaceGame/libs -Lc:/Users/jaspe/RaceGame/libs -LC:/Users/jaspe/Documents/lib-mingw-w64 c:/Users/jaspe/RaceGame/main.cpp c:/Users/jaspe/RaceGame/libs/miniaudio.c c:/Users/jaspe/RaceGame/assetManager.cpp c:/Users/jaspe/RaceGame/soundEngine.cpp c:/Users/jaspe/RaceGame/libs/glad.cpp c:/Users/jaspe/RaceGame/libs/whereami.o C:/Users/jaspe/Documents/lib-mingw-w64/libglfw3.a -o c:/Users/jaspe/RaceGame/game.exe -lopengl32 -lgdi32 -luser32 -lshell32 ; ./game.exe",
+            "group": "build",
+            "presentation": {
+                "reveal": "always"
+            }
         }
     ]
 }

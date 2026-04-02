@@ -12,8 +12,8 @@ struct AngleLimits {
 };
 
 struct ZoomLimits {
-    float near;
-    float far;
+    float nearPlane;
+    float farPlane;
 };
 
 class Camera {
@@ -35,7 +35,7 @@ public:
     }
 
     void updateOrbitRadius(float newRadius) {
-        radius = std::min(std::max(newRadius, zoomLimits.near), zoomLimits.far);
+        radius = std::min(std::max(newRadius, zoomLimits.nearPlane), zoomLimits.farPlane);
     }
 
     void tick() {

@@ -34,6 +34,12 @@ struct OBB {
     }
 };
 
+struct RaycastHit {
+    bool hit = false;
+    float distance = FLT_MAX;
+    glm::vec3 normal;
+};
+
 struct Wheel {
     glm::vec3 connectionPoint;
     float suspensionRestLength = 0.5f;
@@ -86,34 +92,156 @@ struct CollisionInfo {
     float penetration;
 };
 
+inline bool rayTriangleIntersect(const glm::vec3& origin, const glm::vec3& dir, const Triangle& tri, float& t, glm::vec3& normal) {
+    const float EPSILON = 1e-6f;
+
+    glm::vec3 v0v1 = tri.v1 - tri.v0;
+    glm::vec3 v0v2 = tri.v2 - tri.v0;
+
+    glm::vec3 pvec = glm::cross(dir, v0v2);
+    float det = glm::dot(v0v1, pvec);
+
+    if (fabs(det) < EPSILON)
+        return false;
+
+    float invDet = 1.0f / det;
+
+    glm::vec3 tvec = origin - tri.v0;
+
+    float u = glm::dot(tvec, pvec) * invDet;
+    if (u < 0.0f || u > 1.0f)
+        return false;
+
+    glm::vec3 qvec = glm::cross(tvec, v0v1);
+
+    float v = glm::dot(dir, qvec) * invDet;
+    if (v < 0.0f || u + v > 1.0f)
+        return false;
+
+    t = glm::dot(v0v2, qvec) * invDet;
+
+    if (t < 0.0f)
+        return false;
+
+    normal = tri.normal;
+
+    return true;
+}
+
+inline RaycastHit raycastTrack(const glm::vec3& origin, const glm::vec3& dir, float maxDist, const TrackCollider& track) {
+    RaycastHit result;
+
+    int gx = (origin.x - track.minBound.x) / track.cellSize;
+    int gz = (origin.z - track.minBound.z) / track.cellSize;
+
+    if(gx < 0 || gz < 0 || gx >= track.gridWidth || gz >= track.gridDepth)
+        return result;
+
+    for(int dx=-1; dx<=1; dx++) {
+        for(int dz=-1; dz<=1; dz++)
+        {
+            int cx = gx + dx;
+            int cz = gz + dz;
+
+            if(cx < 0 || cz < 0 || cx >= track.gridWidth || cz >= track.gridDepth)
+                continue;
+
+            int index = cx + cz * track.gridWidth;
+
+            const std::vector<int>& tris = track.grid[index];
+
+            for(int triIndex : tris)
+            {
+                const Triangle& tri = track.triangles[triIndex];
+
+                float t;
+                glm::vec3 normal;
+
+                if(rayTriangleIntersect(origin, dir, tri, t, normal))
+                {
+                    if(t < result.distance && t <= maxDist)
+                    {
+                        printf("VALID HIT t=%f\n", t);
+                        result.hit = true;
+                        result.distance = t;
+                        result.normal = normal;
+                    }
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
 class RacingVehicle {
 public:
     RigidBody* body;
     std::vector<Wheel> wheels;
 
-    void updateSuspension(float dt, const std::vector<AABB*>& world) {
+    void updateSuspension(float dt, const TrackCollider& track) {
+
+        body->m_onGround = false;
+
+        glm::vec3 avgNormal(0.0f);
+        int contacts = 0;
+
         for (auto& wheel : wheels) {
-            glm::vec3 worldWheelPos = body->m_position + (body->m_obb.rotation * wheel.connectionPoint);
-            glm::vec3 rayDir = body->m_obb.rotation[1] * -1.0f;
+            glm::vec3 worldWheelPos =
+                body->m_position +
+                (body->m_obb.rotation * wheel.connectionPoint);
 
-            float distance = castRay(worldWheelPos, rayDir, wheel.suspensionRestLength + wheel.wheelRadius, world);
+            //glm::vec3 rayDir = -body->m_obb.rotation[1];
+            glm::vec3 rayDir = glm::vec3(0,-1,0);
 
-            if (distance < wheel.suspensionRestLength + wheel.wheelRadius) {
-                float compression = (wheel.suspensionRestLength + wheel.wheelRadius) - distance;
+            RaycastHit hit = raycastTrack(
+                worldWheelPos,
+                rayDir,
+                wheel.suspensionRestLength + wheel.wheelRadius,
+                track
+            );
+
+            if (hit.hit) {
+                float compression = (wheel.suspensionRestLength + wheel.wheelRadius) - hit.distance;
+
+                compression = glm::clamp(compression, 0.0f, wheel.suspensionRestLength);
+
                 float springForce = compression * wheel.springStiffness;
+
                 float suspensionVelocity = (compression - wheel.lastCompression) / dt;
+
                 float damperForce = suspensionVelocity * wheel.damperStiffness;
+                damperForce = glm::max(damperForce, -springForce);
+
                 wheel.lastCompression = compression;
 
-                glm::vec3 totalUpForce = rayDir * -(springForce + damperForce);
-                applyForceAtPoint(totalUpForce, worldWheelPos);
+                float suspensionForce = springForce + damperForce;
+                suspensionForce = glm::clamp(suspensionForce, 0.0f, 40000.0f);
 
-                glm::vec3 wheelVelocity = body->m_velocity + glm::cross(body->m_angularVelocity, worldWheelPos - body->m_position);
-                glm::vec3 sideDir = body->m_obb.rotation[0];
-                float sideVel = glm::dot(wheelVelocity, sideDir);
-                glm::vec3 frictionImpulse = -sideDir * (sideVel * wheel.friction * body->m_mass * dt);
-                applyForceAtPoint(frictionImpulse, worldWheelPos);
+                glm::vec3 force = -rayDir * suspensionForce;
+
+                applyForceAtPoint(force, worldWheelPos);
+
+                avgNormal += hit.normal;
+                contacts++;
             }
+        }
+
+        if (contacts > 0) {
+            avgNormal /= (float)contacts;
+            avgNormal = glm::normalize(avgNormal);
+
+            glm::vec3 carUp = body->m_obb.rotation[1];
+
+            glm::vec3 axis = glm::cross(carUp, avgNormal);
+            float angle = glm::length(axis);
+
+            if (angle > 0.0001f) {
+                axis = glm::normalize(axis);
+                body->m_angularVelocity += axis * angle * 8.0f;
+            }
+
+            body->m_onGround = true;
         }
     }
 
@@ -158,26 +286,6 @@ inline CollisionInfo checkOBBCollision(const OBB& a, const OBB& b) {
     return result;
 }
 
-// Direct floor resolution, bypasses SAT entirely to avoid normal ambiguity.
-// Projects all 8 OBB vertices to find the true lowest point, then pushes up.
-inline bool resolveBodyVsFloor(RigidBody* b, const AABB* floor) {
-    auto vertices = b->m_obb.getVertices();
-    float lowestY = vertices[0].y;
-    for (int i = 1; i < 8; i++)
-        lowestY = std::min(lowestY, vertices[i].y);
-
-    float floorTop = floor->center.y + floor->halfExtents.y;
-
-    if (lowestY < floorTop) {
-        b->m_position.y += (floorTop - lowestY);
-        b->updateTransform();
-        if (b->m_velocity.y < 0) b->m_velocity.y = 0.0f;
-        b->m_onGround = true;
-        return true;
-    }
-    return false;
-}
-
 class SimplePhysicsEngine {
 public:
     std::vector<RigidBody*> bodies;
@@ -207,10 +315,6 @@ public:
 
                 // Sync OBB
                 b->updateTransform();
-
-                // Floor resolution (direct, no SAT)
-                for (auto staticCollider : staticColliders)
-                    resolveBodyVsFloor(b, staticCollider);
             }
 
             // Car vs car (SAT)

@@ -15,6 +15,7 @@
 
 #include <vector>
 #include <iostream>
+#include <filesystem>
 
 #define MAX_BONE_INFLUENCE 4
 
@@ -197,11 +198,12 @@ private:
 // Forward declaration of ModelResource
 class ModelResource;
 
+namespace fs = std::filesystem;
+
 // AssetManager definition with nested Pool template
 class AssetManager {
 public:
     static std::string buildModelPath(const std::string &modelPath) {
-        namespace fs = std::filesystem;
         fs::path p(modelPath);
         std::string stem = p.filename().string();
         if (stem.empty()) {
@@ -281,9 +283,12 @@ public:
         draw(shader);
     }
 
+    std::vector<Mesh>* getMeshes() {
+        return &meshes;
+    }
+
     void load(const std::string& path) override {
         std::cerr << "ModelResource::load called with path: " << path << '\n';
-        namespace fs = std::filesystem;
         if (fs::exists(path) && fs::is_directory(path)) {
             // try to resolve an obj within the directory
             fs::path dir(path);
@@ -297,7 +302,7 @@ public:
             return;
         }
         // store directory for texture loading
-        size_t pos = path.find_last_of('/');
+        size_t pos = path.find_last_of("/\\");
         if (pos == std::string::npos) {
             directory = "";
         } else {
@@ -327,15 +332,15 @@ public:
         auto& shapes = reader.GetShapes();
         auto& materials = reader.GetMaterials();
 
-        std::cerr << "attrib sizes: verts=" << attrib.vertices.size()
-                  << " normals=" << attrib.normals.size()
-                  << " texcoords=" << attrib.texcoords.size() << '\n';
-        std::cerr << "shapes count=" << shapes.size() << " materials=" << materials.size() << '\n';
+        // std::cerr << "attrib sizes: verts=" << attrib.vertices.size()
+        //           << " normals=" << attrib.normals.size()
+        //           << " texcoords=" << attrib.texcoords.size() << '\n';
+        // std::cerr << "shapes count=" << shapes.size() << " materials=" << materials.size() << '\n';
 
         // Loop over shapes and create Mesh objects grouped by material
         for (size_t s = 0; s < shapes.size(); s++) {
-            std::cerr << "processing shape " << s << " with faces="
-                      << shapes[s].mesh.num_face_vertices.size() << '\n';
+            // std::cerr << "processing shape " << s << " with faces="
+            //           << shapes[s].mesh.num_face_vertices.size() << '\n';
             // group by material id -> per-material vertex/index arrays
             struct MeshData { std::vector<Vertex> vertices; std::vector<unsigned int> indices; };
             std::map<int, MeshData> groups;
@@ -343,14 +348,14 @@ public:
             size_t index_offset = 0;
             for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) {
                 if (f % 500 == 0) {
-                    std::cerr << "  shape " << s << " face " << f << "\n";
+                    //std::cerr << "  shape " << s << " face " << f << "\n";
                 }
                 size_t fv = size_t(shapes[s].mesh.num_face_vertices[f]);
 
                 if (index_offset + fv > shapes[s].mesh.indices.size()) {
-                    std::cerr << "ERROR: shape " << s << " idx overflow at face " << f 
-                              << " (index_offset=" << index_offset << ", fv=" << fv 
-                              << ", indices.size=" << shapes[s].mesh.indices.size() << ")\n";
+                    // std::cerr << "ERROR: shape " << s << " idx overflow at face " << f 
+                    //           << " (index_offset=" << index_offset << ", fv=" << fv 
+                    //           << ", indices.size=" << shapes[s].mesh.indices.size() << ")\n";
                     return;
                 }
 
@@ -361,7 +366,7 @@ public:
 
                 for (size_t v = 0; v < fv; v++) {
                     if (v == 0 && f % 1000 == 0) {
-                        std::cerr << "    face " << f << " starts, fv=" << fv << "\n";
+                        //std::cerr << "    face " << f << " starts, fv=" << fv << "\n";
                     }
                     if (index_offset + v >= shapes[s].mesh.indices.size()) {
                         std::cerr << "ERROR: shape " << s << " index out of bounds (" << (index_offset + v)

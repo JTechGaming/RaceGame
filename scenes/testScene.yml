@@ -6,7 +6,7 @@ sceneObjects:
     transform: {
       pos: [ 0.0, 0.0, 0.0 ],
       rot: [ 0.0, 0.0, 0.0 ],
-      scale: [ 0.15, 0.15, 0.15 ]
+      scale: [ 0.12, 0.12, 0.12 ]
     }
 
 startingPawn: 1
