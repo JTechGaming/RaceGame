@@ -18,7 +18,7 @@ struct AABB {
 struct OBB {
     glm::vec3 center;
     glm::vec3 halfExtents;
-    glm::mat3 rotation; 
+    glm::mat3 rotation;
 
     std::vector<glm::vec3> getVertices() const {
         std::vector<glm::vec3> v(8);
@@ -37,7 +37,7 @@ struct OBB {
 struct Wheel {
     glm::vec3 connectionPoint;
     float suspensionRestLength = 0.5f;
-    float springStiffness = 5000.0f; // Increased for heavy cars
+    float springStiffness = 5000.0f;
     float damperStiffness = 500.0f;
     float wheelRadius = 0.3f;
     float friction = 0.8f;
@@ -49,22 +49,22 @@ struct RigidBody {
     glm::quat m_orientation;
     glm::vec3 m_velocity;
     glm::vec3 m_angularVelocity;
-    
+
     float m_mass;
     float m_inverseMass;
     glm::mat3 m_inertiaTensorInv;
     OBB m_obb;
+    bool m_onGround = false;
 
-    RigidBody(glm::vec3 pos, glm::vec3 extents, float mass) 
-        : m_position(pos), m_orientation(glm::vec3(0)), m_velocity(0), 
+    RigidBody(glm::vec3 pos, glm::vec3 extents, float mass)
+        : m_position(pos), m_orientation(glm::vec3(0)), m_velocity(0),
           m_angularVelocity(0), m_mass(mass) {
-        
+
         m_inverseMass = (mass > 0) ? 1.0f / mass : 0.0f;
         m_obb.center = pos;
         m_obb.halfExtents = extents;
         m_obb.rotation = glm::mat3_cast(m_orientation);
 
-        // Basic moments of inertia for a box
         float x2 = (extents.x * 2) * (extents.x * 2);
         float y2 = (extents.y * 2) * (extents.y * 2);
         float z2 = (extents.z * 2) * (extents.z * 2);
@@ -94,7 +94,7 @@ public:
     void updateSuspension(float dt, const std::vector<AABB*>& world) {
         for (auto& wheel : wheels) {
             glm::vec3 worldWheelPos = body->m_position + (body->m_obb.rotation * wheel.connectionPoint);
-            glm::vec3 rayDir = body->m_obb.rotation[1] * -1.0f; 
+            glm::vec3 rayDir = body->m_obb.rotation[1] * -1.0f;
 
             float distance = castRay(worldWheelPos, rayDir, wheel.suspensionRestLength + wheel.wheelRadius, world);
 
@@ -108,11 +108,10 @@ public:
                 glm::vec3 totalUpForce = rayDir * -(springForce + damperForce);
                 applyForceAtPoint(totalUpForce, worldWheelPos);
 
-                // Grip
                 glm::vec3 wheelVelocity = body->m_velocity + glm::cross(body->m_angularVelocity, worldWheelPos - body->m_position);
-                glm::vec3 sideDir = body->m_obb.rotation[0]; 
+                glm::vec3 sideDir = body->m_obb.rotation[0];
                 float sideVel = glm::dot(wheelVelocity, sideDir);
-                glm::vec3 frictionImpulse = -sideDir * (sideVel * wheel.friction * body->m_mass * dt); // Force instead of impuls
+                glm::vec3 frictionImpulse = -sideDir * (sideVel * wheel.friction * body->m_mass * dt);
                 applyForceAtPoint(frictionImpulse, worldWheelPos);
             }
         }
@@ -125,12 +124,12 @@ public:
     }
 
     float castRay(glm::vec3 origin, glm::vec3 dir, float maxDist, const std::vector<AABB*>& world) {
-        if (origin.y < maxDist) return origin.y; 
+        if (origin.y < maxDist) return origin.y;
         return maxDist + 1.0f;
     }
 };
 
-// Collision Detection (SAT)
+// SAT, used only for OBB vs OBB (car vs car)
 inline void projectOBB(const OBB& box, const glm::vec3& axis, float& min, float& max) {
     auto vertices = box.getVertices();
     min = max = glm::dot(vertices[0], axis);
@@ -145,7 +144,7 @@ inline CollisionInfo checkOBBCollision(const OBB& a, const OBB& b) {
     CollisionInfo result{false, glm::vec3(0), FLT_MAX};
     glm::vec3 axes[6] = { a.rotation[0], a.rotation[1], a.rotation[2], b.rotation[0], b.rotation[1], b.rotation[2] };
 
-    for (int i=0; i<6; i++) {
+    for (int i = 0; i < 6; i++) {
         glm::vec3 axis = glm::normalize(axes[i]);
         float minA, maxA, minB, maxB;
         projectOBB(a, axis, minA, maxA);
@@ -159,15 +158,26 @@ inline CollisionInfo checkOBBCollision(const OBB& a, const OBB& b) {
     return result;
 }
 
-inline CollisionInfo checkOBBvsAABB(const OBB& a, const AABB& b) {
-    OBB bAsObb;
-    bAsObb.center = b.center;
-    bAsObb.halfExtents = b.halfExtents;
-    bAsObb.rotation = glm::mat3(1.0f); // Identity matrix = no rotation
-    return checkOBBCollision(a, bAsObb);
+// Direct floor resolution, bypasses SAT entirely to avoid normal ambiguity.
+// Projects all 8 OBB vertices to find the true lowest point, then pushes up.
+inline bool resolveBodyVsFloor(RigidBody* b, const AABB* floor) {
+    auto vertices = b->m_obb.getVertices();
+    float lowestY = vertices[0].y;
+    for (int i = 1; i < 8; i++)
+        lowestY = std::min(lowestY, vertices[i].y);
+
+    float floorTop = floor->center.y + floor->halfExtents.y;
+
+    if (lowestY < floorTop) {
+        b->m_position.y += (floorTop - lowestY);
+        b->updateTransform();
+        if (b->m_velocity.y < 0) b->m_velocity.y = 0.0f;
+        b->m_onGround = true;
+        return true;
+    }
+    return false;
 }
 
-// Physics Engine
 class SimplePhysicsEngine {
 public:
     std::vector<RigidBody*> bodies;
@@ -182,31 +192,36 @@ public:
         float subDt = dt / (float)SUB_STEPS;
         for (int s = 0; s < SUB_STEPS; s++) {
             for (auto b : bodies) {
-                for (auto staticCollider : staticColliders) {
-                    auto col = checkOBBvsAABB(b->m_obb, *staticCollider);
-                    if (col.colliding) {
-                        // push car up and stop vertical velocity
-                        b->m_position += col.normal * col.penetration;
-                        b->updateTransform();
-
-                        float velDot = glm::dot(b->m_velocity, col.normal);
-                        if (velDot < 0) {
-                            b->m_velocity -= col.normal * velDot;
-                        }
-                    }
-                }
                 if (b->m_mass <= 0) continue;
+
+                b->m_onGround = false;
+
+                // Integrate forces
                 b->m_velocity += gravity * subDt;
                 b->m_position += b->m_velocity * subDt;
-                glm::quat q = glm::quat(0, b->m_angularVelocity * subDt);
-                b->m_orientation += (q * 0.5f) * b->m_orientation;
+
+                // Local-space quaternion integration
+                glm::quat q = glm::quat(0.0f, b->m_angularVelocity * subDt);
+                b->m_orientation += 0.5f * (b->m_orientation * q);
                 b->m_orientation = glm::normalize(b->m_orientation);
+
+                // Sync OBB
                 b->updateTransform();
+
+                // Floor resolution (direct, no SAT)
+                for (auto staticCollider : staticColliders)
+                    resolveBodyVsFloor(b, staticCollider);
             }
+
+            // Car vs car (SAT)
             for (size_t i = 0; i < bodies.size(); i++) {
                 for (size_t j = i + 1; j < bodies.size(); j++) {
                     auto col = checkOBBCollision(bodies[i]->m_obb, bodies[j]->m_obb);
-                    if (col.colliding) resolveCollision(bodies[i], bodies[j], col);
+                    if (col.colliding) {
+                        resolveCollision(bodies[i], bodies[j], col);
+                        bodies[i]->updateTransform();
+                        bodies[j]->updateTransform();
+                    }
                 }
             }
         }
@@ -224,8 +239,10 @@ private:
         glm::vec3 impulse = j * col.normal;
         a->m_velocity -= impulse * a->m_inverseMass;
         b->m_velocity += impulse * b->m_inverseMass;
-        // Positionele correctie
-        glm::vec3 correction = (std::max(col.penetration - 0.01f, 0.0f) / totalInvMass) * 0.2f * col.normal;
+
+        const float slop = 0.01f;
+        const float percent = 0.2f;
+        glm::vec3 correction = (std::max(col.penetration - slop, 0.0f) / totalInvMass) * percent * col.normal;
         a->m_position -= correction * a->m_inverseMass;
         b->m_position += correction * b->m_inverseMass;
     }

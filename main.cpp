@@ -7,8 +7,8 @@
 // the compiler).
 #define RYML_SINGLE_HDR_DEFINE_NOW
 #include "sceneManager.hpp"
-
 #include "assetManager.hpp"
+#include "soundEngine.hpp"
 
 #include "shader.h"
 
@@ -56,11 +56,13 @@ RaceGame game;
 IGame& gameRef = game;
 
 int main() {
+    SoundEngine::init();
     ModelResource::setAssetManager(&assetManager);
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_SAMPLES, 4);
     #ifdef __APPLE__
         glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     #endif

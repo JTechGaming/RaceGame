@@ -11,6 +11,8 @@
 #include "tiny_obj_loader.h"
 #include "stb_image.h"
 
+#include "soundEngine.hpp"
+
 #include <vector>
 #include <iostream>
 
@@ -32,6 +34,22 @@ public:
     std::string filePath;
     virtual void load(const std::string& path) = 0;
     virtual ~Resource() {}
+};
+
+class SoundResource : public Resource {
+public:
+    void load(const std::string& path) override {
+        m_path = path;
+        m_sound = SoundEngine::registerSound(path.c_str());
+    }
+
+    ~SoundResource() {
+        SoundEngine::deallocSound(&m_sound);
+    }
+
+private:
+    std::string m_path;
+    ma_sound m_sound;
 };
 
 class TextureResource : public Resource {
@@ -135,6 +153,7 @@ public:
         glBindVertexArray(0);
     }  
     void draw(Shader &shader) {
+        glEnable(GL_MULTISAMPLE);
         // Always set material color (fallback from .mtl Kd) before texturing.
         shader.setVec3("material.baseColor", baseColor);
 
@@ -224,8 +243,9 @@ public:
 
     Pool<TextureResource> texturePool;
     Pool<ModelResource> modelPool;
+    Pool<SoundResource> soundPool;
 
-    AssetManager() : texturePool(this), modelPool(this) {}
+    AssetManager() : texturePool(this), modelPool(this), soundPool(this) {}
 
     ModelResource* loadModel(const std::string& path) {
         ModelResource* model = modelPool.getOrLoad(path);
@@ -233,7 +253,6 @@ public:
     }
 };
 
-// Now define ModelResource after AssetManager is declared
 class ModelResource : public Resource {
 private:
     static AssetManager* s_assetManager;

@@ -5,29 +5,34 @@
 #include "camera.hpp"
 #include "physicsEngine.hpp"
 
+struct CarInput {
+    bool forward = false;
+    bool backward = false;
+    bool left = false;
+    bool right = false;
+    bool brake = false;
+};
+
 class RaceGame : public IGame {
 public:
     void OnInit(AssetManager* assetManager, SceneManager* sceneManager, std::string basePath) override {
         objects.reserve(3);
 
-        // Create the player
         Object car{};
         car.model = assetManager->loadModel(AssetManager::buildModelPath("models/car2"));
-        car.modelTransform = Transform{glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.0f), glm::vec3(1.0f)};
+        car.modelTransform = Transform{glm::vec3(0.0f, 2.0f, 0.0f), glm::vec3(0.0f), glm::vec3(1.0f)};
         objects.insert({"Player", car});
 
-        // Create RigidBody for Player (pos, halfExtents, mass)
-        RigidBody* playerBody = new RigidBody(glm::vec3(0, 5, 0), glm::vec3(1.0f, 0.5f, 2.0f), 1200.0f);
+        RigidBody* playerBody = new RigidBody(glm::vec3(0, 2, 0), glm::vec3(1.0f, 0.5f, 2.0f), 1200.0f);
         physicsEngine.addBody(playerBody);
         bodyMap["Player"] = playerBody;
 
         camera.attachToObject(&objects["Player"], glm::vec3(0.0f, 2.0f, 0.0f), 5.0f, -15.0f, 0.0f, {45.0f, 360.0f}, {2.0f, 10.0f});
 
-        // Create the AI cars
         std::vector<std::string> others = {"Fake1", "Fake2"};
-        std::vector<glm::vec3> positions = {glm::vec3(3, 5, 0), glm::vec3(-3, 5, 0)};
+        std::vector<glm::vec3> positions = {glm::vec3(3, 2, 0), glm::vec3(-3, 2, 0)};
 
-        for(int i=0; i < others.size(); i++) {
+        for (int i = 0; i < (int)others.size(); i++) {
             Object otherCar{};
             otherCar.model = assetManager->loadModel(AssetManager::buildModelPath("models/car2"));
             otherCar.modelTransform = Transform{positions[i], glm::vec3(0.0f), glm::vec3(1.0f)};
@@ -38,49 +43,83 @@ public:
             bodyMap[others[i]] = rb;
         }
 
-        AABB* floorCollider = new AABB(glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(100.0f, 1.0f, 100.0f));
+        // Thin slab floor top surface at y=0
+        AABB* floorCollider = new AABB(glm::vec3(0.0f, -0.05f, 0.0f), glm::vec3(100.0f, 0.05f, 100.0f));
         physicsEngine.addStaticCollider(floorCollider);
     }
 
-    void OnShutdown() override {
-
-    }
+    void OnShutdown() override {}
 
     void OnTick(float deltaTime) override {
-        RigidBody* player = bodyMap["Player"];
+        std::vector<std::string> carIds = {"Player", "Fake1", "Fake2"};
 
-        // Determine direction based on the current rotation of the RigidBody
-        glm::mat3 rotationMat = glm::mat3_cast(player->m_orientation);
-        glm::vec3 forward = rotationMat[2]; // Z-axis of the OBB
-        glm::vec3 right = rotationMat[0];   // X-axis of the OBB
+        for (const std::string& id : carIds) {
+            RigidBody* rb = bodyMap[id];
+            CarInput input;
 
-        // input to force
-        float engineForce = 15000.0f;
-        float turnTorque = 8000.0f;
+            if (id == "Player") {
+                input.forward  = isKeyPressed(GLFW_KEY_W);
+                input.backward = isKeyPressed(GLFW_KEY_S);
+                input.left     = isKeyPressed(GLFW_KEY_A);
+                input.right    = isKeyPressed(GLFW_KEY_D);
+                input.brake    = isKeyPressed(GLFW_KEY_SPACE);
+            } else {
+                // AI logic
+                // IGOORRRRR
+            }
 
-        if (isKeyPressed(GLFW_KEY_W)) {
-            player->m_velocity += forward * engineForce * player->m_inverseMass * deltaTime;
-        }
-        if (isKeyPressed(GLFW_KEY_S)) {
-            player->m_velocity -= forward * engineForce * player->m_inverseMass * deltaTime;
-        }
-        if (isKeyPressed(GLFW_KEY_A)) {
-            player->m_angularVelocity.y += turnTorque * player->m_inertiaTensorInv[1][1] * deltaTime;
-        }
-        if (isKeyPressed(GLFW_KEY_D)) {
-            player->m_angularVelocity.y -= turnTorque * player->m_inertiaTensorInv[1][1] * deltaTime;
-        }
+            // Physics
+            glm::mat3 rotationMat = glm::mat3_cast(rb->m_orientation);
+            glm::vec3 forward = rotationMat[2];
+            glm::vec3 right   = rotationMat[0];
 
-        // Simple air resistance (Drag) to prevent infinite acceleration
-        player->m_velocity *= 0.98f;
-        player->m_angularVelocity *= 0.95f;
+            const float engineForce = 15000.0f;
+            const float turnTorque  = 20000.0f;
+            const float maxSpeed    = 30.0f;
+            float forwardSpeed = glm::dot(rb->m_velocity, forward);
+
+            if (rb->m_onGround) {
+                // Acceleration
+                if (input.forward && forwardSpeed < maxSpeed)
+                    rb->m_velocity += forward * engineForce * rb->m_inverseMass * deltaTime;
+                if (input.backward && forwardSpeed > -maxSpeed * 0.5f)
+                    rb->m_velocity -= forward * engineForce * rb->m_inverseMass * deltaTime;
+
+                // Steering
+                float grip = glm::clamp(std::abs(forwardSpeed) / 5.0f, 0.0f, 1.0f);
+                float turnDir = (forwardSpeed >= 0.0f) ? 1.0f : -1.0f;
+
+                if (input.left)
+                    rb->m_angularVelocity.y += turnTorque * rb->m_inertiaTensorInv[1][1] * grip * turnDir * deltaTime;
+                if (input.right)
+                    rb->m_angularVelocity.y -= turnTorque * rb->m_inertiaTensorInv[1][1] * grip * turnDir * deltaTime;
+
+                // Braking and drifting
+                float driftFactor = input.brake ? 0.2f : 1.0f;
+                if (input.brake) {
+                    rb->m_velocity *= (1.0f - 0.99f * deltaTime);
+                }
+
+                // Lateral grip (Sideways sliding)
+                float lateralSpeed = glm::dot(rb->m_velocity, right);
+                rb->m_velocity -= right * lateralSpeed * (0.85f * driftFactor);
+
+                // Rolling resistance
+                if (!input.forward && !input.backward) {
+                    rb->m_velocity -= forward * forwardSpeed * 0.005f;
+                }
+            }
+
+            // damping (air resistance)
+            rb->m_velocity        *= 0.999f;
+            rb->m_angularVelocity *= 0.90f;
+        }
 
         physicsEngine.step(deltaTime);
 
-        // physics to world objects
+        // Sync to renderer
         for (auto const& [id, body] : bodyMap) {
             objects[id].modelTransform.pos = body->m_position;
-            // Convert Quaternion back to Euler for the Transform class
             objects[id].modelTransform.rot = glm::eulerAngles(body->m_orientation);
         }
     }
@@ -88,13 +127,12 @@ public:
     void OnPreRender(Shader& shader, float deltaTime) override {}
 
     void OnPostRender(Shader& shader, float deltaTime) override {
-        for (auto& el : objects) {
+        for (auto& el : objects)
             el.second.model->draw(shader, el.second.modelTransform);
-        }
     }
 
-    void setDebug(bool debug) override {}
-    bool getDebug() const override {}
+    void setDebug(bool debug) override { m_debug = debug; }
+    bool getDebug() const override { return m_debug; }
 
     Camera& getCamera() { return camera; }
 
@@ -103,6 +141,7 @@ private:
     std::unordered_map<std::string, RigidBody*> bodyMap;
     SimplePhysicsEngine physicsEngine;
     Camera camera;
+    bool m_debug = false;
 
     std::unordered_map<std::string, RacingVehicle> vehicles;
 };
