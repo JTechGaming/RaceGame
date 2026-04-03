@@ -161,7 +161,6 @@ inline RaycastHit raycastTrack(const glm::vec3& origin, const glm::vec3& dir, fl
                 {
                     if(t < result.distance && t <= maxDist)
                     {
-                        printf("VALID HIT t=%f\n", t);
                         result.hit = true;
                         result.distance = t;
                         result.normal = normal;
@@ -174,12 +173,21 @@ inline RaycastHit raycastTrack(const glm::vec3& origin, const glm::vec3& dir, fl
     return result;
 }
 
+struct WheelContact {
+    glm::vec3 contactPoint;
+    glm::vec3 contactNormal;
+    float contactDistance;
+    bool isInContact;
+};
+
 class RacingVehicle {
 public:
     RigidBody* body;
     std::vector<Wheel> wheels;
+    std::vector<WheelContact> wheelContacts;
 
     void updateSuspension(float dt, const TrackCollider& track) {
+        wheelContacts.clear();
 
         body->m_onGround = false;
 
@@ -203,6 +211,9 @@ public:
             );
 
             if (hit.hit) {
+                glm::vec3 contactPoint = rayStart + rayDir * hit.distance;
+                wheelContacts.push_back({contactPoint, hit.normal, hit.distance, true});
+
                 float compression = (wheel.suspensionRestLength + wheel.wheelRadius) - hit.distance;
 
                 compression = glm::clamp(compression, 0.0f, wheel.suspensionRestLength);
@@ -225,6 +236,8 @@ public:
 
                 avgNormal += hit.normal;
                 contacts++;
+            } else {
+                wheelContacts.push_back({glm::vec3(0), glm::vec3(0), 0, false});
             }
         }
 
@@ -257,6 +270,29 @@ public:
         return maxDist + 1.0f;
     }
 };
+
+inline void correctCarHeight(RigidBody* body, RacingVehicle& vehicle, float wheelRadius) {
+    float highestContactY = -FLT_MAX;
+    bool hasContact = false;
+
+    for (const auto& contact : vehicle.wheelContacts) {
+        if (contact.isInContact) {
+            if (contact.contactPoint.y > highestContactY) {
+                highestContactY = contact.contactPoint.y;
+                hasContact = true;
+            }
+        }
+    }
+
+    if (hasContact) {
+        float desiredHeight = highestContactY + wheelRadius + 0.05f; // small offset above terrain
+        if (body->m_position.y < desiredHeight) {
+            body->m_position.y = glm::mix(body->m_position.y, desiredHeight, 0.5f); // smooth correction
+            body->m_velocity.y = 0; // stop sinking
+            body->m_onGround = true;
+        }
+    }
+}
 
 // SAT, used only for OBB vs OBB (car vs car)
 inline void projectOBB(const OBB& box, const glm::vec3& axis, float& min, float& max) {
@@ -339,8 +375,8 @@ private:
         glm::vec3 rv = b->m_velocity - a->m_velocity;
         float velAlongNormal = glm::dot(rv, col.normal);
         if (velAlongNormal > 0) return;
-        float e = 0.2f;
-        float j = -(1.0f + e) * velAlongNormal / totalInvMass;
+        float restitution = 0.2f;
+        float j = -(1.0f + restitution) * velAlongNormal / totalInvMass;
         glm::vec3 impulse = j * col.normal;
         a->m_velocity -= impulse * a->m_inverseMass;
         b->m_velocity += impulse * b->m_inverseMass;
