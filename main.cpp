@@ -256,5 +256,6 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     }
     if (key == GLFW_KEY_F && action == GLFW_PRESS) {
         WIREFRAME_MODE = !WIREFRAME_MODE;
+        gameRef.setWireframe(WIREFRAME_MODE);
     }
 }

@@ -19,3 +19,21 @@ float MathUtils::getProjectionParameter(const glm::vec3& point, const glm::vec3&
     float t = glm::dot(point - lineStart, lineDir) / lineLengthSquared;
     return t;
 }
+
+glm::vec3 MathUtils::findModelDimensions(ModelResource* model) {
+    if (model == nullptr || model->getMeshes()->empty()) {
+        return glm::vec3(0.0f);
+    }
+
+    glm::vec3 minVertex = model->getMeshes()->at(0).vertices[0].position;
+    glm::vec3 maxVertex = model->getMeshes()->at(0).vertices[0].position;
+
+    for (const auto& mesh : *model->getMeshes()) {
+        for (const auto& vertex : mesh.vertices) {
+            minVertex = glm::min(minVertex, vertex.position);
+            maxVertex = glm::max(maxVertex, vertex.position);
+        }
+    }
+
+    return maxVertex - minVertex;
+}

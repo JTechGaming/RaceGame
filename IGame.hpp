@@ -17,6 +17,8 @@ public:
 
     virtual void setDebug(bool debug) = 0;
     virtual bool getDebug() const = 0;
+    virtual void setWireframe(bool wireframe) = 0;
+    virtual bool getWireframe() const = 0;
 
     // Input helper functions
     void setWindow(GLFWwindow* window) { m_window = window; }

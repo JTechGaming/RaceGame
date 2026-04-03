@@ -108,10 +108,11 @@ public:
 
         Object car{};
         car.model = assetManager->loadModel(AssetManager::buildModelPath("models/car2"));
-        car.modelTransform = Transform{glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f), glm::vec3(1.0f)};
+        car.modelTransform = Transform{glm::vec3(0.0f, -2.0f, 0.0f), glm::vec3(0.0f), glm::vec3(1.0f)};
         objects.insert({"Player", car});
 
-        RigidBody* playerBody = new RigidBody(glm::vec3(0, 1, 0), glm::vec3(1.0f, 0.5f, 2.0f), 1200.0f);
+        glm::vec3 playerDimensions = MathUtils::findModelDimensions(car.model) / 2.0f;
+        RigidBody* playerBody = new RigidBody(glm::vec3(0, playerDimensions.y, 0), playerDimensions, 1200.0f);
         physicsEngine.addBody(playerBody);
         bodyMap["Player"] = playerBody;
 
@@ -138,10 +139,10 @@ public:
         RacingVehicle playerVehicle;
         playerVehicle.body = playerBody;
         playerVehicle.wheels = {
-            {{-0.9f,0.0f, 1.3f}},
-            {{ 0.9f,0.0f, 1.3f}},
-            {{-0.9f,0.0f,-1.3f}},
-            {{ 0.9f,0.0f,-1.3f}}
+            {{-0.85f,-0.25f, 1.1f}},
+            {{ 0.85f,-0.25f, 1.1f}},
+            {{-0.85f,-0.25f,-1.45f}},
+            {{ 0.85f,-0.25f,-1.45f}}
         };
         vehicles["Player"] = playerVehicle;
 
@@ -161,10 +162,10 @@ public:
             RacingVehicle botVehicle;
             botVehicle.body = rb;
             botVehicle.wheels = {
-                {{-0.9f,0.0f, 1.3f}},
-                {{ 0.9f,0.0f, 1.3f}},
-                {{-0.9f,0.0f,-1.3f}},
-                {{ 0.9f,0.0f,-1.3f}}
+                {{-0.85f,-0.25f, 1.1f}},
+                {{ 0.85f,-0.25f, 1.1f}},
+                {{-0.85f,-0.25f,-1.45f}},
+                {{ 0.85f,-0.25f,-1.45f}}
             };
             vehicles[others[i]] = botVehicle;
         }
@@ -175,7 +176,7 @@ public:
     void OnShutdown() override {}
 
     void OnTick(float deltaTime) override {
-        const float maxSpeed = 55.0f;
+        const float maxSpeed = 150.0f;
         const float maxReverseSpeed = 18.0f;
         const float accel = 40.0f;
         const float reverseAccel = 24.0f;
@@ -191,11 +192,9 @@ public:
         const float wallClearanceForward = 1.05f;
         const float wallClearanceSide = 0.82f;
         const float wallProbeHalfWidth = 0.78f;
-        const float rollDampingBase = 0.35f;
         const float orientationSmooth = 8.0f;
         const float heightSmooth = 10.0f;
         const float groundNormalSmooth = 10.0f;
-        const float steerRollSuppress = 0.9f;
         const float groundSnapGrace = 0.16f;
         const float maxStepDown = 0.45f;
         const float recoveryMaxStepDown = 3.0f;
@@ -295,8 +294,11 @@ public:
                 forwardOnGround = glm::normalize(forwardOnGround);
 
             float steerInput = 0.0f;
-            if (input.left) steerInput += 1.0f;
-            if (input.right) steerInput -= 1.0f;
+            bool isGoingBackwards = speed < -0.5f;
+            if (input.left && !isGoingBackwards) steerInput += 1.0f;
+            if (input.right && !isGoingBackwards) steerInput -= 1.0f;
+            if (input.left && isGoingBackwards) steerInput -= 1.0f;
+            if (input.right && isGoingBackwards) steerInput += 1.0f;
 
             float steerScale = glm::clamp(std::abs(speed) / maxSpeed, 0.25f, 1.0f);
             float steerAmount = steerInput * steerRate * steerScale * deltaTime;
@@ -427,43 +429,100 @@ public:
             applyWallProbe(candidatePos + probeUpOffset, wallProbeRight, wallClearanceSide + 0.25f, wallClearanceSide);
             applyWallProbe(candidatePos + probeUpOffset, -wallProbeRight, wallClearanceSide + 0.25f, wallClearanceSide);
 
-            glm::vec3 right = glm::cross(snappedNormal, forwardOnGround);
+            glm::vec3 rightOnGround = glm::cross(snappedNormal, forwardOnGround);
+            if (glm::length(rightOnGround) < 0.001f)
+                rightOnGround = glm::vec3(1.0f, 0.0f, 0.0f);
+            else
+                rightOnGround = glm::normalize(rightOnGround);
+
+            auto sampleWheelGroundY = [&](const glm::vec3& probePos, float& outY) {
+                glm::vec3 hitNormal = snappedNormal;
+                return sampleGround(
+                    probePos + snappedNormal * 0.2f,
+                    rightOnGround,
+                    forwardOnGround,
+                    snappedGroundY,
+                    carUp,
+                    recoveryMaxStepDown,
+                    outY,
+                    hitNormal);
+            };
+
+            float frontOffset = 1.3f;
+            float rearOffset = -1.3f;
+            float halfTrack = 0.9f;
+            auto vehicleIt = vehicles.find(id);
+            if (vehicleIt != vehicles.end() && !vehicleIt->second.wheels.empty()) {
+                frontOffset = -1000.0f;
+                rearOffset = 1000.0f;
+                halfTrack = 0.0f;
+
+                for (const Wheel& wheel : vehicleIt->second.wheels) {
+                    frontOffset = std::max(frontOffset, wheel.connectionPoint.z);
+                    rearOffset = std::min(rearOffset, wheel.connectionPoint.z);
+                    halfTrack = std::max(halfTrack, std::abs(wheel.connectionPoint.x));
+                }
+            }
+
+            float flY = 0.0f, frY = 0.0f, rlY = 0.0f, rrY = 0.0f;
+            bool hasFL = sampleWheelGroundY(candidatePos + forwardOnGround * frontOffset - rightOnGround * halfTrack, flY);
+            bool hasFR = sampleWheelGroundY(candidatePos + forwardOnGround * frontOffset + rightOnGround * halfTrack, frY);
+            bool hasRL = sampleWheelGroundY(candidatePos + forwardOnGround * rearOffset - rightOnGround * halfTrack, rlY);
+            bool hasRR = sampleWheelGroundY(candidatePos + forwardOnGround * rearOffset + rightOnGround * halfTrack, rrY);
+
+            float frontY = snappedGroundY;
+            int frontHits = 0;
+            if (hasFL) { frontY += flY; frontHits++; }
+            if (hasFR) { frontY += frY; frontHits++; }
+            if (frontHits > 0)
+                frontY /= (float)(frontHits + 1);
+
+            float rearY = snappedGroundY;
+            int rearHits = 0;
+            if (hasRL) { rearY += rlY; rearHits++; }
+            if (hasRR) { rearY += rrY; rearHits++; }
+            if (rearHits > 0)
+                rearY /= (float)(rearHits + 1);
+
+            float wheelGroundSum = 0.0f;
+            int wheelGroundHits = 0;
+            if (hasFL) { wheelGroundSum += flY; wheelGroundHits++; }
+            if (hasFR) { wheelGroundSum += frY; wheelGroundHits++; }
+            if (hasRL) { wheelGroundSum += rlY; wheelGroundHits++; }
+            if (hasRR) { wheelGroundSum += rrY; wheelGroundHits++; }
+            if (wheelGroundHits > 0) {
+                float targetY = (wheelGroundSum / (float)wheelGroundHits) + rideHeight;
+                float hAlpha = glm::clamp(heightSmooth * deltaTime, 0.0f, 1.0f);
+                candidatePos.y = glm::mix(candidatePos.y, targetY, hAlpha);
+            }
+
+            float wheelBase = glm::max(frontOffset - rearOffset, 0.2f);
+            float slope = glm::clamp((frontY - rearY) / wheelBase, -1.0f, 1.0f);
+
+            // Hard no-roll safeguard: always build orientation from world up and pitch only.
+            glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+            glm::vec3 yawForward = glm::vec3(forwardOnGround.x, 0.0f, forwardOnGround.z);
+            if (glm::length(yawForward) < 0.001f)
+                yawForward = glm::vec3(0.0f, 0.0f, 1.0f);
+            else
+                yawForward = glm::normalize(yawForward);
+
+            glm::vec3 pitchedForward = glm::normalize(yawForward + worldUp * slope);
+            glm::vec3 right = glm::cross(worldUp, pitchedForward);
             if (glm::length(right) < 0.001f)
                 right = glm::vec3(1.0f, 0.0f, 0.0f);
             else
                 right = glm::normalize(right);
 
-            glm::vec3 correctedForward = glm::normalize(glm::cross(right, snappedNormal));
+            glm::vec3 up = glm::normalize(glm::cross(pitchedForward, right));
 
-            // Reduce side-roll artifacts on noisy angled steps by blending toward a no-roll frame while steering.
-            glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-            glm::vec3 flatRight = glm::cross(worldUp, correctedForward);
-            if (glm::length(flatRight) > 0.001f) {
-                flatRight = glm::normalize(flatRight);
-                glm::vec3 noRollUp = glm::normalize(glm::cross(correctedForward, flatRight));
-                float rollSuppress = glm::clamp(rollDampingBase + std::abs(steerInput) * steerRollSuppress, 0.0f, 0.95f);
-                glm::vec3 stabilizedUp = glm::normalize(glm::mix(snappedNormal, noRollUp, rollSuppress));
-
-                correctedForward = correctedForward - stabilizedUp * glm::dot(correctedForward, stabilizedUp);
-                if (glm::length(correctedForward) < 0.001f)
-                    correctedForward = forwardOnGround;
-                else
-                    correctedForward = glm::normalize(correctedForward);
-
-                right = glm::normalize(glm::cross(stabilizedUp, correctedForward));
-                snappedNormal = stabilizedUp;
-            }
-
-            glm::vec3 up = glm::normalize(glm::cross(correctedForward, right));
-            right = glm::normalize(glm::cross(up, correctedForward));
-
-            glm::mat3 targetRotation(right, up, correctedForward);
+            glm::mat3 targetRotation(right, up, pitchedForward);
             glm::quat targetOrientation = glm::normalize(glm::quat_cast(targetRotation));
             float rotAlpha = glm::clamp(orientationSmooth * deltaTime, 0.0f, 1.0f);
 
             rb->m_position = candidatePos;
             rb->m_orientation = glm::normalize(glm::slerp(rb->m_orientation, targetOrientation, rotAlpha));
-            rb->m_velocity = correctedForward * speed;
+            rb->m_velocity = pitchedForward * speed;
             rb->m_angularVelocity = glm::vec3(0.0f);
             rb->updateTransform();
 
@@ -471,7 +530,7 @@ public:
         }
 
         for (auto const& [id, body] : bodyMap) {
-            objects[id].modelTransform.pos = body->m_position;
+            objects[id].modelTransform.pos = body->m_position - glm::vec3(0.0f, body->m_obb.halfExtents.y, 0.0f);
             objects[id].modelTransform.rot = glm::eulerAngles(body->m_orientation);
         }
     }
@@ -481,6 +540,20 @@ public:
     void OnPostRender(Shader& shader, float deltaTime) override {
         for (auto& el : objects)
             el.second.model->draw(shader, el.second.modelTransform);
+
+        if (m_wireframe) {
+            for (auto& wheel : vehicles["Player"].wheels) {
+                glm::vec3 worldWheelPos = vehicles["Player"].body->m_position +
+                                        vehicles["Player"].body->m_obb.rotation * wheel.connectionPoint;
+                Transform debugTransform{worldWheelPos, glm::vec3(0.0f), glm::vec3(0.1f)};
+                shader.setVec3("material.baseColor", glm::vec3(0.0f, 1.0f, 0.0f));
+                debugCube->draw(shader, debugTransform);
+            }
+
+            Transform carRidgidBodyTransform{vehicles["Player"].body->m_obb.center, glm::eulerAngles(vehicles["Player"].body->m_orientation), vehicles["Player"].body->m_obb.halfExtents};
+            shader.setVec3("material.baseColor", glm::vec3(0.0f, 0.0f, 1.0f));
+            debugCube->draw(shader, carRidgidBodyTransform);
+        }
 
         if (m_debug) {
             for (glm::vec3 point : m_sceneManager->getScene().trackSpline._points) {
@@ -493,6 +566,8 @@ public:
 
     void setDebug(bool debug) override { m_debug = debug; }
     bool getDebug() const override { return m_debug; }
+    void setWireframe(bool wireframe) override { m_wireframe = wireframe; }
+    bool getWireframe() const override { return m_wireframe; }
 
     Camera& getCamera() { return camera; }
 
@@ -574,6 +649,7 @@ private:
     SimplePhysicsEngine physicsEngine;
     Camera camera;
     bool m_debug = false;
+    bool m_wireframe = false;
 
     ModelResource* debugCube = nullptr;
 

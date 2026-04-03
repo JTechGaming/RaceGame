@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include "assetManager.hpp"
 
 class Spline {
 public:
@@ -40,7 +41,7 @@ struct TrackCollider {
     std::vector<std::vector<int>> grid; // triangle indices
 };
 
-glm::vec3 applyTransform(const glm::vec3& v, const Transform& t) {
+inline glm::vec3 applyTransform(const glm::vec3& v, const Transform& t) {
     glm::vec3 scaled = v * t.scale;
 
     glm::mat4 rot =
@@ -54,7 +55,10 @@ glm::vec3 applyTransform(const glm::vec3& v, const Transform& t) {
 }
 
 class MathUtils {
+public:
     static glm::vec3 distance(glm::vec3 point1, glm::vec3 point2);
     static glm::vec3 lerp(const glm::vec3& start, const glm::vec3& end, float t);
     static float getProjectionParameter(const glm::vec3& point, const glm::vec3& lineStart, const glm::vec3& lineEnd);
+
+    static glm::vec3 findModelDimensions(ModelResource* model);
 };
