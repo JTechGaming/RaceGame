@@ -191,11 +191,12 @@ public:
                 body->m_position +
                 (body->m_obb.rotation * wheel.connectionPoint);
 
-            //glm::vec3 rayDir = -body->m_obb.rotation[1];
-            glm::vec3 rayDir = glm::vec3(0,-1,0);
+            glm::vec3 rayStart = worldWheelPos + glm::vec3(0, wheel.suspensionRestLength, 0);
+
+            glm::vec3 rayDir = -body->m_obb.rotation[1];
 
             RaycastHit hit = raycastTrack(
-                worldWheelPos,
+                rayStart,
                 rayDir,
                 wheel.suspensionRestLength + wheel.wheelRadius,
                 track

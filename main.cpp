@@ -23,8 +23,6 @@
 #include "game.hpp"
 #include "camera.hpp"
 
-#define WIREFRAME_MODE false
-
 void processInput(GLFWwindow *window);
 void framebufferSizeCallback(GLFWwindow* window, int width, int height);
 void mouseCallback(GLFWwindow* window, double xpos, double ypos);
@@ -38,6 +36,8 @@ float lastFrame = 0.0f;
 
 float nearPlane = 0.001f;
 float farPlane = 1000.0f;
+
+bool WIREFRAME_MODE = false;
 
 float fov = 90.0f;
 
@@ -169,6 +169,8 @@ int main() {
 
         if (WIREFRAME_MODE) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        } else {
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         }
 
         // toggle UV debug visualization with U key (edge detect)
@@ -251,5 +253,8 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     }
     if (key == GLFW_KEY_P && action == GLFW_PRESS) {
         gameRef.setDebug(!gameRef.getDebug());
+    }
+    if (key == GLFW_KEY_F && action == GLFW_PRESS) {
+        WIREFRAME_MODE = !WIREFRAME_MODE;
     }
 }

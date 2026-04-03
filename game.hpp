@@ -272,11 +272,11 @@ public:
             rb->m_angularVelocity *= 0.95f;
         }
 
+        physicsEngine.step(deltaTime);
+
         for (auto& [id, vehicle] : vehicles) {
             vehicle.updateSuspension(deltaTime, trackCollider);
         }
-
-        physicsEngine.step(deltaTime);
 
         for (auto const& [id, body] : bodyMap) {
             objects[id].modelTransform.pos = body->m_position;
