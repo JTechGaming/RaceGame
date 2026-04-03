@@ -182,7 +182,7 @@ public:
         const float reverseAccel = 24.0f;
         const float brakeDamping = 4.2f;
         const float coastDamping = 1.35f;
-        const float steerRate = 50.0f;
+        const float steerRate = 55.0f;
         const float rideHeight = 0.58f;
         const float wallBounce = 0.45f;
         const float wallPushback = 0.2f;
@@ -229,7 +229,7 @@ public:
             // --- DRIFT PARAMETERS ---
             const float driftEntrySpeed = 15.0f;      // min speed to start drifting
             const float driftSteerMultiplier = 2.2f;   // how much faster the car rotates while drifting
-            const float driftFriction = 0.4f;          // lateral friction during drift (lower = more slide)
+            const float driftFriction = 0.45f;          // lateral friction during drift (lower = more slide)
             const float driftRecoveryRate = 3.0f;      // how fast velocity realigns after drift ends
             const float maxDriftAngle = 1.2f;          // max slip angle in radians (~69 degrees)
 
@@ -258,6 +258,14 @@ public:
             float steerAmount = steerInput * effectiveSteerRate * steerScale * deltaTime;
             if (std::abs(steerAmount) > 0.0f) {
                 carForward = glm::normalize(glm::rotate(glm::angleAxis(steerAmount, rotMat[1]), carForward));
+
+                // Cornering friction: turning scrubs speed due to tire lateral force
+                // More turning = more speed loss; reduced during drift (tires already sliding)
+                float corneringFriction = 4.5f;  // speed loss per radian of steering
+                float driftCorneringScale = 0.35f; // how much cornering friction applies during drift
+                float frictionScale = drift.isDrifting ? driftCorneringScale : 1.0f;
+                float speedLoss = std::abs(steerAmount) * corneringFriction * frictionScale * std::abs(speed);
+                speed -= glm::sign(speed) * glm::min(speedLoss, std::abs(speed) * 0.5f * deltaTime);
             }
 
             // Acceleration/Braking
