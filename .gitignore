@@ -1,1 +1,5 @@
 *.exe
+build/
+.idea/
+_deps/
+CMakeCache.txt
