@@ -112,7 +112,7 @@ public:
         objects.insert({"Player", car});
 
         glm::vec3 playerDimensions = MathUtils::findModelDimensions(car.model) / 2.0f;
-        RigidBody* playerBody = new RigidBody(glm::vec3(0, playerDimensions.y, 0), playerDimensions, 1200.0f);
+        RigidBody* playerBody = new RigidBody(glm::vec3(0, 7.0f, 0), playerDimensions, 1200.0f);
         physicsEngine.addBody(playerBody);
         bodyMap["Player"] = playerBody;
 
@@ -147,7 +147,7 @@ public:
         vehicles["Player"] = playerVehicle;
 
         std::vector<std::string> others = {"Fake1", "Fake2"};
-        std::vector<glm::vec3> positions = {glm::vec3(3, 1, 0), glm::vec3(-3, 1, 0)};
+        std::vector<glm::vec3> positions = {glm::vec3(3, 7, 0), glm::vec3(-3, 7, 0)};
 
         for (int i = 0; i < (int)others.size(); i++) {
             Object otherCar{};
@@ -182,7 +182,7 @@ public:
         const float reverseAccel = 24.0f;
         const float brakeDamping = 4.2f;
         const float coastDamping = 1.35f;
-        const float steerRate = 20.0f;
+        const float steerRate = 50.0f;
         const float rideHeight = 0.58f;
         const float wallBounce = 0.45f;
         const float wallPushback = 0.2f;
@@ -226,6 +226,15 @@ public:
             glm::vec3 carForward = rotMat[2];
             glm::vec3 carRight = rotMat[0];
 
+            // --- DRIFT PARAMETERS ---
+            const float driftEntrySpeed = 15.0f;      // min speed to start drifting
+            const float driftSteerMultiplier = 2.2f;   // how much faster the car rotates while drifting
+            const float driftFriction = 0.4f;          // lateral friction during drift (lower = more slide)
+            const float driftRecoveryRate = 3.0f;      // how fast velocity realigns after drift ends
+            const float maxDriftAngle = 1.2f;          // max slip angle in radians (~69 degrees)
+
+            DriftState& drift = m_driftStates[id];
+
             // Steering
             float steerInput = 0.0f;
             bool isGoingBackwards = speed < -0.5f;
@@ -233,8 +242,20 @@ public:
             if (input.right && !isGoingBackwards) steerInput -= 1.0f;
             if (input.left && isGoingBackwards) steerInput -= 1.0f;
             if (input.right && isGoingBackwards) steerInput += 1.0f;
+
+            // Drift entry: brake + steer + going fast enough
+            bool wantsDrift = input.brake && std::abs(steerInput) > 0.01f && std::abs(speed) > driftEntrySpeed;
+            if (wantsDrift) {
+                drift.isDrifting = true;
+            }
+            if (drift.isDrifting && (std::abs(speed) < 3.0f || (!input.brake && std::abs(drift.driftAngle) < 0.05f))) {
+                drift.isDrifting = false;
+            }
+
             float steerScale = glm::clamp(std::abs(speed) / maxSpeed, 0.25f, 1.0f);
-            float steerAmount = steerInput * steerRate * steerScale * deltaTime;
+            float effectiveSteerRate = steerRate;
+            if (drift.isDrifting) effectiveSteerRate *= driftSteerMultiplier;
+            float steerAmount = steerInput * effectiveSteerRate * steerScale * deltaTime;
             if (std::abs(steerAmount) > 0.0f) {
                 carForward = glm::normalize(glm::rotate(glm::angleAxis(steerAmount, rotMat[1]), carForward));
             }
@@ -242,12 +263,46 @@ public:
             // Acceleration/Braking
             if (input.forward) speed += accel * deltaTime;
             if (input.backward) speed -= reverseAccel * deltaTime;
-            if (input.brake) speed *= glm::max(0.0f, 1.0f - brakeDamping * deltaTime);
+            // During drift, brake doesn't slow you down as much (you're sliding)
+            if (input.brake && !drift.isDrifting) speed *= glm::max(0.0f, 1.0f - brakeDamping * deltaTime);
+            else if (input.brake && drift.isDrifting) speed *= glm::max(0.0f, 1.0f - brakeDamping * 0.15f * deltaTime);
             speed *= glm::max(0.0f, 1.0f - coastDamping * deltaTime);
             speed = glm::clamp(speed, -maxReverseSpeed, maxSpeed);
 
-            // Move car forward along its current forward vector
-            glm::vec3 candidatePos = carPos + carForward * speed * deltaTime;
+            // Initialize velocity direction if not set
+            if (glm::length(drift.velocityDir) < 0.5f) drift.velocityDir = carForward;
+
+            // Update velocity direction based on drift state
+            if (drift.isDrifting) {
+                // During drift: velocity direction lags behind facing direction
+                // Apply lateral friction to slowly pull velocity toward facing
+                float realignRate = driftFriction * deltaTime;
+                drift.velocityDir = glm::normalize(glm::mix(drift.velocityDir, carForward, realignRate));
+
+                // Compute current drift angle
+                float dot = glm::clamp(glm::dot(carForward, drift.velocityDir), -1.0f, 1.0f);
+                float cross = carForward.x * drift.velocityDir.z - carForward.z * drift.velocityDir.x;
+                drift.driftAngle = std::atan2(cross, dot);
+
+                // Clamp max drift angle
+                if (std::abs(drift.driftAngle) > maxDriftAngle) {
+                    float clampedAngle = glm::sign(drift.driftAngle) * maxDriftAngle;
+                    // Rotate carForward to be maxDriftAngle away from velocityDir
+                    drift.velocityDir = glm::normalize(glm::rotate(
+                        glm::angleAxis(-clampedAngle, rotMat[1]), carForward));
+                    drift.driftAngle = clampedAngle;
+                }
+            } else {
+                // Not drifting: quickly realign velocity to facing direction
+                float realignRate = glm::clamp(driftRecoveryRate * deltaTime, 0.0f, 1.0f);
+                drift.velocityDir = glm::normalize(glm::mix(drift.velocityDir, carForward, realignRate));
+                float dot = glm::clamp(glm::dot(carForward, drift.velocityDir), -1.0f, 1.0f);
+                float cross = carForward.x * drift.velocityDir.z - carForward.z * drift.velocityDir.x;
+                drift.driftAngle = std::atan2(cross, dot);
+            }
+
+            // Move car along velocity direction (not facing direction)
+            glm::vec3 candidatePos = carPos + drift.velocityDir * speed * deltaTime;
 
             // --- GROUND ALIGNMENT (fit-plane) ---
             std::vector<glm::vec3> hitPoints;
@@ -271,13 +326,19 @@ public:
             // Count valid hits
             int validHits = 0;
             for (size_t i = 0; i < hasHits.size(); ++i) { if (hasHits[i]) validHits++; }
-            if (validHits < 3) {
-                // Not enough ground contacts, just update position and speed
-                rb->m_position = candidatePos;
-                rb->m_velocity = carForward * speed;
-                m_forwardSpeed[id] = speed;
+            bool isGrounded = (validHits >= 3);
+            if (!isGrounded) {
+                // Airborne: apply gravity with accumulated vertical velocity
+                // speed *= glm::max(0.0f, 1.0f - coastDamping * deltaTime);
+                // m_fallSpeed[id] += 9.81f * deltaTime; // accumulate gravity
+                // candidatePos.y -= m_fallSpeed[id] * deltaTime;
+                // rb->m_position = candidatePos;
+                // rb->m_velocity = carForward * speed;
+                // m_forwardSpeed[id] = speed;
+                // rb->updateTransform();
                 continue;
             }
+            m_fallSpeed[id] = 0.0f; // reset fall speed when grounded
             // Compute plane normal using two spanning vectors
             // Wheels: 0=FL, 1=FR, 2=RL, 3=RR
             // across = left-to-right, along = front-to-rear
@@ -316,6 +377,34 @@ public:
             }
             if (hitCount > 0) targetY /= (float)hitCount;
             else targetY = candidatePos.y;
+
+            // --- WALL COLLISION ---
+            auto wallProbe = [&](const glm::vec3& origin, const glm::vec3& dir, float dist, float clearance) {
+                RaycastHit hit = raycastTrack(origin, dir, dist, trackCollider);
+                if (!hit.hit) return;
+                glm::vec3 wallN = glm::normalize(hit.normal);
+                if (glm::dot(wallN, dir) > 0.0f) wallN = -wallN;
+                // Only react to near-vertical surfaces (walls)
+                if (std::abs(wallN.y) > 0.3f) return;
+                float pen = clearance - hit.distance;
+                if (pen <= 0.0f) return;
+                candidatePos += wallN * (pen + wallPushback * 0.25f);
+                float approach = glm::dot(forwardOnPlane, wallN);
+                if (approach < 0.0f) {
+                    speed *= glm::clamp(1.0f - (-approach * wallBounce), 0.0f, 1.0f);
+                }
+            };
+            glm::vec3 probeUp = normal * 0.25f;
+            float dynWallDist = wallProbeDist + std::abs(speed) * deltaTime;
+            // Front probes
+            wallProbe(candidatePos + probeUp, forwardOnPlane, dynWallDist, wallClearanceForward);
+            wallProbe(candidatePos + right * wallProbeHalfWidth + probeUp, forwardOnPlane, dynWallDist, wallClearanceForward);
+            wallProbe(candidatePos - right * wallProbeHalfWidth + probeUp, forwardOnPlane, dynWallDist, wallClearanceForward);
+            // Rear probes
+            wallProbe(candidatePos + probeUp, -forwardOnPlane, dynWallDist, wallClearanceForward);
+            // Side probes
+            wallProbe(candidatePos + probeUp, right, wallClearanceSide + 0.25f, wallClearanceSide);
+            wallProbe(candidatePos + probeUp, -right, wallClearanceSide + 0.25f, wallClearanceSide);
 
             // Smoothly interpolate orientation; set X/Z directly, smooth only Y
             float rotAlpha = glm::clamp(orientationSmooth * deltaTime, 0.0f, 1.0f);
@@ -571,9 +660,16 @@ private:
 
     std::unordered_map<std::string, RacingVehicle> vehicles;
     std::unordered_map<std::string, float> m_forwardSpeed;
+    std::unordered_map<std::string, float> m_fallSpeed;
     std::unordered_map<std::string, GroundState> m_groundStates;
 
-    bool m_isDrifting = false;
+    struct DriftState {
+        glm::vec3 velocityDir = glm::vec3(0, 0, 1); // direction the car is actually moving
+        bool isDrifting = false;
+        float driftAngle = 0.0f; // signed angle between facing and velocity
+    };
+    std::unordered_map<std::string, DriftState> m_driftStates;
+
     ModelResource* trackModel = nullptr;
     TrackCollider trackCollider;
 };

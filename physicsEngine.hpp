@@ -327,7 +327,7 @@ class SimplePhysicsEngine {
 public:
     std::vector<RigidBody*> bodies;
     std::vector<AABB*> staticColliders;
-    glm::vec3 gravity{0, -9.81f, 0};
+    glm::vec3 gravity{0, 0, 0};
     const int SUB_STEPS = 8;
 
     void addBody(RigidBody* body) { bodies.push_back(body); }
