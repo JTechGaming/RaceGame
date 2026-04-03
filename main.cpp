@@ -194,6 +194,8 @@ int main() {
         Shader &active = showUV ? uvShader : shader;
         active.setMat4("projection", projection);
         active.setMat4("view", view);
+        active.setBool("debug", false);
+        shader.setVec3("material.baseColor", glm::vec3(1.0f));
         
         game.OnPreRender(active, deltaTime);
 

@@ -11,10 +11,14 @@ struct Material {
 };
 
 uniform Material material;
+uniform bool debug;
 
-void main()
-{
+void main() {
     vec4 tex = texture(material.texture_diffuse1, texCoord);
     // If no texture is provided, defaultTexture is white and baseColor holds Kd fallback.
-    fragColor = vec4(material.baseColor * tex.rgb, tex.a);
+    if (debug) {
+        fragColor = vec4(material.baseColor, 1.0);
+    } else {
+        fragColor = vec4(material.baseColor * tex.rgb, tex.a);
+    }
 }

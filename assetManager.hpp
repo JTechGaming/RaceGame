@@ -155,8 +155,6 @@ public:
     }  
     void draw(Shader &shader) {
         glEnable(GL_MULTISAMPLE);
-        // Always set material color (fallback from .mtl Kd) before texturing.
-        shader.setVec3("material.baseColor", baseColor);
 
         if (textures.empty()) {
             glActiveTexture(GL_TEXTURE0);

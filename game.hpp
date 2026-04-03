@@ -205,9 +205,6 @@ public:
         for (const std::string& id : carIds) {
             RigidBody* rb = bodyMap[id];
             CarInput input;
-
-            GroundState& groundState = m_groundStates[id];
-
             if (id == "Player") {
                 input.forward  = isKeyPressed(GLFW_KEY_W);
                 input.backward = isKeyPressed(GLFW_KEY_S);
@@ -216,316 +213,120 @@ public:
                 input.brake    = isKeyPressed(GLFW_KEY_SPACE);
             }
 
-            glm::mat3 rotationMat = glm::mat3_cast(rb->m_orientation);
-            glm::vec3 carForward = glm::normalize(rotationMat[2]);
-            glm::vec3 carRight = glm::normalize(rotationMat[0]);
-            glm::vec3 carUp = glm::normalize(rotationMat[1]);
+            auto& vehicle = vehicles[id];
+            glm::vec3 carPos = rb->m_position;
+            glm::quat carRot = rb->m_orientation;
             float speed = m_forwardSpeed[id];
-            float dynamicStepDown = maxStepDown + std::abs(speed) * deltaTime * 2.0f;
+            float wheelRadius = 0.3f;
+            float raycastHeight = 2.0f;
+            glm::mat3 rotMat = glm::mat3_cast(carRot);
 
-            if (!groundState.hasGround) {
-                groundState.hasGround = true;
-                groundState.groundY = rb->m_position.y - rideHeight;
-                groundState.normal = carUp;
-            }
+            // --- MOVEMENT LOGIC (input, speed, steering) ---
+            // We'll use the previous orientation to move, then align to ground
+            glm::vec3 carForward = rotMat[2];
+            glm::vec3 carRight = rotMat[0];
 
-            float groundY = groundState.groundY;
-            glm::vec3 groundNormal = groundState.normal;
-            bool isGrounded = sampleGround(
-                rb->m_position,
-                carRight,
-                carForward,
-                groundState.groundY,
-                carUp,
-                dynamicStepDown,
-                groundY,
-                groundNormal);
-
-            if (isGrounded) {
-                float nAlpha = glm::clamp(groundNormalSmooth * deltaTime, 0.0f, 1.0f);
-                glm::vec3 blendedNormal = glm::normalize(glm::mix(groundState.normal, groundNormal, nAlpha));
-
-                groundState.hasGround = true;
-                groundState.groundY = groundY;
-                groundState.normal = blendedNormal;
-                groundState.airborneTime = 0.0f;
-
-                groundNormal = blendedNormal;
-            } else {
-                groundState.airborneTime += deltaTime;
-                if (groundState.airborneTime < groundSnapGrace) {
-                    isGrounded = true;
-                    groundY = groundState.groundY;
-                    groundNormal = groundState.normal;
-                } else {
-                    // Recovery probe: allow larger drop to reacquire stair/ramp transitions.
-                    float recoveredY = groundY;
-                    glm::vec3 recoveredNormal = groundNormal;
-                    bool recovered = sampleGround(
-                        rb->m_position,
-                        carRight,
-                        carForward,
-                        rb->m_position.y - rideHeight,
-                        carUp,
-                        recoveryMaxStepDown,
-                        recoveredY,
-                        recoveredNormal);
-
-                    if (recovered) {
-                        float nAlpha = glm::clamp((groundNormalSmooth * 0.7f) * deltaTime, 0.0f, 1.0f);
-                        glm::vec3 blendedNormal = glm::normalize(glm::mix(groundState.normal, recoveredNormal, nAlpha));
-
-                        isGrounded = true;
-                        groundY = recoveredY;
-                        groundNormal = blendedNormal;
-                        groundState.groundY = recoveredY;
-                        groundState.normal = blendedNormal;
-                        groundState.airborneTime = 0.0f;
-                    }
-                }
-            }
-
-            rb->m_onGround = isGrounded;
-
-            glm::vec3 forwardOnGround = carForward - groundNormal * glm::dot(carForward, groundNormal);
-            if (glm::length(forwardOnGround) < 0.001f)
-                forwardOnGround = glm::vec3(0.0f, 0.0f, 1.0f);
-            else
-                forwardOnGround = glm::normalize(forwardOnGround);
-
+            // Steering
             float steerInput = 0.0f;
             bool isGoingBackwards = speed < -0.5f;
             if (input.left && !isGoingBackwards) steerInput += 1.0f;
             if (input.right && !isGoingBackwards) steerInput -= 1.0f;
             if (input.left && isGoingBackwards) steerInput -= 1.0f;
             if (input.right && isGoingBackwards) steerInput += 1.0f;
-
             float steerScale = glm::clamp(std::abs(speed) / maxSpeed, 0.25f, 1.0f);
             float steerAmount = steerInput * steerRate * steerScale * deltaTime;
             if (std::abs(steerAmount) > 0.0f) {
-                forwardOnGround = glm::normalize(glm::rotate(
-                    glm::angleAxis(steerAmount, groundNormal),
-                    forwardOnGround));
+                carForward = glm::normalize(glm::rotate(glm::angleAxis(steerAmount, rotMat[1]), carForward));
             }
 
+            // Acceleration/Braking
             if (input.forward) speed += accel * deltaTime;
             if (input.backward) speed -= reverseAccel * deltaTime;
             if (input.brake) speed *= glm::max(0.0f, 1.0f - brakeDamping * deltaTime);
             speed *= glm::max(0.0f, 1.0f - coastDamping * deltaTime);
             speed = glm::clamp(speed, -maxReverseSpeed, maxSpeed);
 
-            glm::vec3 candidatePos = rb->m_position + forwardOnGround * speed * deltaTime;
+            // Move car forward along its current forward vector
+            glm::vec3 candidatePos = carPos + carForward * speed * deltaTime;
 
-            float snappedGroundY = groundY;
-            glm::vec3 snappedNormal = groundNormal;
-            if (sampleGround(
-                    candidatePos + groundNormal * 0.25f,
-                    carRight,
-                    forwardOnGround,
-                    groundState.groundY,
-                    carUp,
-                    dynamicStepDown,
-                    snappedGroundY,
-                    snappedNormal)) {
-                float targetY = snappedGroundY + rideHeight;
-                float hAlpha = glm::clamp(heightSmooth * deltaTime, 0.0f, 1.0f);
-                candidatePos.y = glm::mix(rb->m_position.y, targetY, hAlpha);
-
-                groundState.groundY = snappedGroundY;
-                groundState.normal = snappedNormal;
-                groundState.airborneTime = 0.0f;
-            } else {
-                // Relaxed reacquisition for fast downward transitions (stairs).
-                float recoveredY = snappedGroundY;
-                glm::vec3 recoveredNormal = snappedNormal;
-                bool recovered = sampleGround(
-                    candidatePos,
-                    carRight,
-                    forwardOnGround,
-                    candidatePos.y - rideHeight,
-                    carUp,
-                    recoveryMaxStepDown,
-                    recoveredY,
-                    recoveredNormal);
-
-                if (recovered) {
-                    float targetY = recoveredY + rideHeight;
-                    float hAlpha = glm::clamp((heightSmooth * 0.7f) * deltaTime, 0.0f, 1.0f);
-                    candidatePos.y = glm::mix(rb->m_position.y, targetY, hAlpha);
-                    snappedNormal = recoveredNormal;
-
-                    groundState.groundY = recoveredY;
-                    groundState.normal = recoveredNormal;
-                    groundState.airborneTime = 0.0f;
+            // --- GROUND ALIGNMENT (fit-plane) ---
+            std::vector<glm::vec3> hitPoints;
+            std::vector<glm::vec3> wheelWorlds;
+            std::vector<bool> hasHits;
+            for (const auto& wheel : vehicle.wheels) {
+                glm::vec3 worldWheel = candidatePos + rotMat * wheel.connectionPoint;
+                wheelWorlds.push_back(worldWheel);
+                glm::vec3 rayStart = glm::vec3(worldWheel.x, candidatePos.y + raycastHeight, worldWheel.z);
+                glm::vec3 down = glm::vec3(0, -1, 0);
+                RaycastHit hit = raycastTrack(rayStart, down, 10.0f, trackCollider);
+                if (hit.hit) {
+                    glm::vec3 hitPt = rayStart + down * hit.distance;
+                    hitPoints.push_back(hitPt);
+                    hasHits.push_back(true);
                 } else {
-                    // Never stay suspended forever if no valid ground was found this frame.
-                    candidatePos.y = rb->m_position.y - fallbackDescentSpeed * deltaTime;
-                    snappedNormal = groundNormal;
+                    hitPoints.push_back(worldWheel);
+                    hasHits.push_back(false);
                 }
             }
-
-            glm::vec3 wallProbeRight = glm::cross(snappedNormal, forwardOnGround);
-            if (glm::length(wallProbeRight) < 0.001f)
-                wallProbeRight = glm::vec3(1.0f, 0.0f, 0.0f);
-            else
-                wallProbeRight = glm::normalize(wallProbeRight);
-
-            auto applyWallProbe = [&](const glm::vec3& rayStart,
-                                      const glm::vec3& rayDir,
-                                      float rayDist,
-                                      float desiredClearance) {
-                RaycastHit hit = raycastTrack(rayStart, rayDir, rayDist, trackCollider);
-                if (!hit.hit)
-                    return;
-
-                glm::vec3 wallNormal = glm::normalize(hit.normal);
-                if (glm::dot(wallNormal, rayDir) > 0.0f)
-                    wallNormal = -wallNormal;
-
-                bool isVerticalSurface = std::abs(wallNormal.y) <= wallNormalYThreshold;
-                bool differsFromGround = std::abs(glm::dot(wallNormal, snappedNormal)) < 0.45f;
-                if (!isVerticalSurface || !differsFromGround)
-                    return;
-
-                glm::vec3 hitPoint = rayStart + rayDir * hit.distance;
-
-                float aheadGroundY = snappedGroundY;
-                glm::vec3 aheadGroundNormal = snappedNormal;
-                bool hasAheadGround = sampleGround(
-                    hitPoint + rayDir * 0.35f,
-                    wallProbeRight,
-                    forwardOnGround,
-                    snappedGroundY,
-                    carUp,
-                    maxStepDown,
-                    aheadGroundY,
-                    aheadGroundNormal);
-
-                bool looksLikeSmallCurb = hasAheadGround && std::abs(aheadGroundY - snappedGroundY) <= curbHeightIgnore;
-                if (looksLikeSmallCurb)
-                    return;
-
-                float penetration = desiredClearance - hit.distance;
-                if (penetration <= 0.0f)
-                    return;
-
-                candidatePos += wallNormal * (penetration + wallPushback * 0.25f);
-
-                float approach = glm::dot(forwardOnGround, wallNormal);
-                if (approach < 0.0f) {
-                    speed *= glm::clamp(1.0f - (-approach * wallBounce), 0.0f, 1.0f);
-                }
-            };
-
-            float dynamicWallProbeDist = wallProbeDist + std::abs(speed) * deltaTime;
-            glm::vec3 probeUpOffset = snappedNormal * 0.25f;
-
-            // Front center/left/right probes make head-on wall detection reliable.
-            applyWallProbe(candidatePos + probeUpOffset, forwardOnGround, dynamicWallProbeDist, wallClearanceForward);
-            applyWallProbe(candidatePos + wallProbeRight * wallProbeHalfWidth + probeUpOffset, forwardOnGround, dynamicWallProbeDist, wallClearanceForward);
-            applyWallProbe(candidatePos - wallProbeRight * wallProbeHalfWidth + probeUpOffset, forwardOnGround, dynamicWallProbeDist, wallClearanceForward);
-
-            // Side probes prevent slipping through walls while sliding/turning near them.
-            applyWallProbe(candidatePos + probeUpOffset, wallProbeRight, wallClearanceSide + 0.25f, wallClearanceSide);
-            applyWallProbe(candidatePos + probeUpOffset, -wallProbeRight, wallClearanceSide + 0.25f, wallClearanceSide);
-
-            glm::vec3 rightOnGround = glm::cross(snappedNormal, forwardOnGround);
-            if (glm::length(rightOnGround) < 0.001f)
-                rightOnGround = glm::vec3(1.0f, 0.0f, 0.0f);
-            else
-                rightOnGround = glm::normalize(rightOnGround);
-
-            auto sampleWheelGroundY = [&](const glm::vec3& probePos, float& outY) {
-                glm::vec3 hitNormal = snappedNormal;
-                return sampleGround(
-                    probePos + snappedNormal * 0.2f,
-                    rightOnGround,
-                    forwardOnGround,
-                    snappedGroundY,
-                    carUp,
-                    recoveryMaxStepDown,
-                    outY,
-                    hitNormal);
-            };
-
-            float frontOffset = 1.3f;
-            float rearOffset = -1.3f;
-            float halfTrack = 0.9f;
-            auto vehicleIt = vehicles.find(id);
-            if (vehicleIt != vehicles.end() && !vehicleIt->second.wheels.empty()) {
-                frontOffset = -1000.0f;
-                rearOffset = 1000.0f;
-                halfTrack = 0.0f;
-
-                for (const Wheel& wheel : vehicleIt->second.wheels) {
-                    frontOffset = std::max(frontOffset, wheel.connectionPoint.z);
-                    rearOffset = std::min(rearOffset, wheel.connectionPoint.z);
-                    halfTrack = std::max(halfTrack, std::abs(wheel.connectionPoint.x));
+            // Count valid hits
+            int validHits = 0;
+            for (size_t i = 0; i < hasHits.size(); ++i) { if (hasHits[i]) validHits++; }
+            if (validHits < 3) {
+                // Not enough ground contacts, just update position and speed
+                rb->m_position = candidatePos;
+                rb->m_velocity = carForward * speed;
+                m_forwardSpeed[id] = speed;
+                continue;
+            }
+            // Compute plane normal using two spanning vectors
+            // Wheels: 0=FL, 1=FR, 2=RL, 3=RR
+            // across = left-to-right, along = front-to-rear
+            glm::vec3 across(0.0f), along(0.0f);
+            bool hasAcross = false, hasAlong = false;
+            if (hasHits[0] && hasHits[1]) { across = hitPoints[1] - hitPoints[0]; hasAcross = true; }
+            else if (hasHits[2] && hasHits[3]) { across = hitPoints[3] - hitPoints[2]; hasAcross = true; }
+            if (hasHits[0] && hasHits[2]) { along = hitPoints[2] - hitPoints[0]; hasAlong = true; }
+            else if (hasHits[1] && hasHits[3]) { along = hitPoints[3] - hitPoints[1]; hasAlong = true; }
+            glm::vec3 normal(0, 1, 0);
+            if (hasAcross && hasAlong) {
+                glm::vec3 n = glm::cross(along, across);
+                if (glm::length(n) > 0.0001f) {
+                    normal = glm::normalize(n);
+                    if (normal.y < 0.0f) normal = -normal; // ensure pointing up
                 }
             }
-
-            float flY = 0.0f, frY = 0.0f, rlY = 0.0f, rrY = 0.0f;
-            bool hasFL = sampleWheelGroundY(candidatePos + forwardOnGround * frontOffset - rightOnGround * halfTrack, flY);
-            bool hasFR = sampleWheelGroundY(candidatePos + forwardOnGround * frontOffset + rightOnGround * halfTrack, frY);
-            bool hasRL = sampleWheelGroundY(candidatePos + forwardOnGround * rearOffset - rightOnGround * halfTrack, rlY);
-            bool hasRR = sampleWheelGroundY(candidatePos + forwardOnGround * rearOffset + rightOnGround * halfTrack, rrY);
-
-            float frontY = snappedGroundY;
-            int frontHits = 0;
-            if (hasFL) { frontY += flY; frontHits++; }
-            if (hasFR) { frontY += frY; frontHits++; }
-            if (frontHits > 0)
-                frontY /= (float)(frontHits + 1);
-
-            float rearY = snappedGroundY;
-            int rearHits = 0;
-            if (hasRL) { rearY += rlY; rearHits++; }
-            if (hasRR) { rearY += rrY; rearHits++; }
-            if (rearHits > 0)
-                rearY /= (float)(rearHits + 1);
-
-            float wheelGroundSum = 0.0f;
-            int wheelGroundHits = 0;
-            if (hasFL) { wheelGroundSum += flY; wheelGroundHits++; }
-            if (hasFR) { wheelGroundSum += frY; wheelGroundHits++; }
-            if (hasRL) { wheelGroundSum += rlY; wheelGroundHits++; }
-            if (hasRR) { wheelGroundSum += rrY; wheelGroundHits++; }
-            if (wheelGroundHits > 0) {
-                float targetY = (wheelGroundSum / (float)wheelGroundHits) + rideHeight;
-                float hAlpha = glm::clamp(heightSmooth * deltaTime, 0.0f, 1.0f);
-                candidatePos.y = glm::mix(candidatePos.y, targetY, hAlpha);
-            }
-
-            float wheelBase = glm::max(frontOffset - rearOffset, 0.2f);
-            float slope = glm::clamp((frontY - rearY) / wheelBase, -1.0f, 1.0f);
-
-            // Hard no-roll safeguard: always build orientation from world up and pitch only.
-            glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-            glm::vec3 yawForward = glm::vec3(forwardOnGround.x, 0.0f, forwardOnGround.z);
-            if (glm::length(yawForward) < 0.001f)
-                yawForward = glm::vec3(0.0f, 0.0f, 1.0f);
-            else
-                yawForward = glm::normalize(yawForward);
-
-            glm::vec3 pitchedForward = glm::normalize(yawForward + worldUp * slope);
-            glm::vec3 right = glm::cross(worldUp, pitchedForward);
-            if (glm::length(right) < 0.001f)
-                right = glm::vec3(1.0f, 0.0f, 0.0f);
-            else
-                right = glm::normalize(right);
-
-            glm::vec3 up = glm::normalize(glm::cross(pitchedForward, right));
-
-            glm::mat3 targetRotation(right, up, pitchedForward);
+            // Project car's forward vector onto plane for new forward
+            glm::vec3 forwardOnPlane = carForward - normal * glm::dot(carForward, normal);
+            if (glm::length(forwardOnPlane) > 0.001f) forwardOnPlane = glm::normalize(forwardOnPlane); else forwardOnPlane = glm::vec3(0,0,1);
+            glm::vec3 right = glm::cross(normal, forwardOnPlane);
+            if (glm::length(right) < 0.001f) right = glm::vec3(1,0,0); else right = glm::normalize(right);
+            glm::mat3 targetRotation(right, normal, forwardOnPlane);
             glm::quat targetOrientation = glm::normalize(glm::quat_cast(targetRotation));
-            float rotAlpha = glm::clamp(orientationSmooth * deltaTime, 0.0f, 1.0f);
+            // Compute target Y: for each valid wheel hit, figure out where the car body
+            // needs to be so that wheel rests on the ground
+            float targetY = 0.0f;
+            int hitCount = 0;
+            for (size_t i = 0; i < hitPoints.size(); ++i) {
+                if (!hasHits[i]) continue;
+                // The wheel's local Y offset from the car body
+                float wheelLocalY = (rotMat * vehicle.wheels[i].connectionPoint).y;
+                // Car body Y should be: hitPoint.y + wheelRadius - wheelLocalY
+                targetY += hitPoints[i].y + wheelRadius - wheelLocalY;
+                hitCount++;
+            }
+            if (hitCount > 0) targetY /= (float)hitCount;
+            else targetY = candidatePos.y;
 
-            rb->m_position = candidatePos;
+            // Smoothly interpolate orientation; set X/Z directly, smooth only Y
+            float rotAlpha = glm::clamp(orientationSmooth * deltaTime, 0.0f, 1.0f);
+            float posAlpha = glm::clamp(heightSmooth * deltaTime, 0.0f, 1.0f);
             rb->m_orientation = glm::normalize(glm::slerp(rb->m_orientation, targetOrientation, rotAlpha));
-            rb->m_velocity = pitchedForward * speed;
+            rb->m_position.x = candidatePos.x;
+            rb->m_position.z = candidatePos.z;
+            rb->m_position.y = glm::mix(rb->m_position.y, targetY, posAlpha);
+            rb->m_velocity = forwardOnPlane * speed;
             rb->m_angularVelocity = glm::vec3(0.0f);
             rb->updateTransform();
-
             m_forwardSpeed[id] = speed;
         }
 
@@ -533,25 +334,136 @@ public:
             objects[id].modelTransform.pos = body->m_position - glm::vec3(0.0f, body->m_obb.halfExtents.y, 0.0f);
             objects[id].modelTransform.rot = glm::eulerAngles(body->m_orientation);
         }
+
+        physicsEngine.step(deltaTime);
     }
 
     void OnPreRender(Shader& shader, float deltaTime) override {}
 
     void OnPostRender(Shader& shader, float deltaTime) override {
-        for (auto& el : objects)
+        for (auto& el : objects) {
+            shader.setBool("debug", false);
             el.second.model->draw(shader, el.second.modelTransform);
+        }
 
         if (m_wireframe) {
-            for (auto& wheel : vehicles["Player"].wheels) {
-                glm::vec3 worldWheelPos = vehicles["Player"].body->m_position +
-                                        vehicles["Player"].body->m_obb.rotation * wheel.connectionPoint;
-                Transform debugTransform{worldWheelPos, glm::vec3(0.0f), glm::vec3(0.1f)};
+            // --- Debug draw for wheels, raycasts, hit points, and fit plane ---
+            const auto& car = vehicles["Player"];
+            glm::vec3 carPos = car.body->m_position;
+            glm::mat3 carRot = car.body->m_obb.rotation;
+            float wheelRadius = 0.3f;
+            float raycastHeight = 2.0f;
+            std::vector<glm::vec3> wheelWorlds;
+            std::vector<glm::vec3> hitPoints;
+            std::vector<bool> hasHits;
+            std::vector<glm::vec3> rayStarts;
+            std::vector<glm::vec3> rayEnds;
+            // For each wheel
+            for (const auto& wheel : car.wheels) {
+                glm::vec3 worldWheel = carPos + carRot * wheel.connectionPoint;
+                wheelWorlds.push_back(worldWheel);
+                glm::vec3 rayStart = glm::vec3(worldWheel.x, carPos.y + raycastHeight, worldWheel.z);
+                glm::vec3 down = glm::vec3(0, -1, 0);
+                RaycastHit hit = raycastTrack(rayStart, down, 10.0f, trackCollider);
+                rayStarts.push_back(rayStart);
+                if (hit.hit) {
+                    glm::vec3 hitPt = rayStart + down * hit.distance;
+                    hitPoints.push_back(hitPt);
+                    hasHits.push_back(true);
+                    rayEnds.push_back(hitPt);
+                } else {
+                    hitPoints.push_back(worldWheel);
+                    hasHits.push_back(false);
+                    rayEnds.push_back(rayStart + down * 10.0f);
+                }
+            }
+            // Draw wheel centers
+            for (const auto& pos : wheelWorlds) {
+                Transform debugTransform{pos, glm::vec3(0.0f), glm::vec3(0.1f)};
                 shader.setVec3("material.baseColor", glm::vec3(0.0f, 1.0f, 0.0f));
+                shader.setBool("debug", true);
                 debugCube->draw(shader, debugTransform);
             }
-
-            Transform carRidgidBodyTransform{vehicles["Player"].body->m_obb.center, glm::eulerAngles(vehicles["Player"].body->m_orientation), vehicles["Player"].body->m_obb.halfExtents};
+            // Draw wheel radius as vertical cylinders (approximate with cubes for now)
+            for (const auto& pos : wheelWorlds) {
+                for (int i = -5; i <= 5; ++i) {
+                    float t = (float)i / 5.0f;
+                    glm::vec3 p = pos + glm::vec3(0, -t * wheelRadius, 0);
+                    Transform debugTransform{p, glm::vec3(0.0f), glm::vec3(0.05f)};
+                    shader.setVec3("material.baseColor", glm::vec3(0.2f, 0.8f, 0.2f));
+                    shader.setBool("debug", true);
+                    debugCube->draw(shader, debugTransform);
+                }
+            }
+            // Draw raycasts
+            for (size_t i = 0; i < rayStarts.size(); ++i) {
+                glm::vec3 start = rayStarts[i];
+                glm::vec3 end = rayEnds[i];
+                int steps = 10;
+                for (int s = 0; s <= steps; ++s) {
+                    float t = (float)s / steps;
+                    glm::vec3 p = glm::mix(start, end, t);
+                    Transform debugTransform{p, glm::vec3(0.0f), glm::vec3(0.03f)};
+                    shader.setVec3("material.baseColor", glm::vec3(0.8f, 0.8f, 0.2f));
+                    shader.setBool("debug", true);
+                    debugCube->draw(shader, debugTransform);
+                }
+            }
+            // Draw hit points
+            for (size_t i = 0; i < hitPoints.size(); ++i) {
+                if (hasHits[i]) {
+                    Transform debugTransform{hitPoints[i], glm::vec3(0.0f), glm::vec3(0.08f)};
+                    shader.setVec3("material.baseColor", glm::vec3(1.0f, 0.0f, 0.0f));
+                    shader.setBool("debug", true);
+                    debugCube->draw(shader, debugTransform);
+                }
+            }
+            // Draw fit plane if at least 3 hits
+            std::vector<glm::vec3> planePoints;
+            for (size_t i = 0; i < hitPoints.size(); ++i) {
+                if (hasHits[i]) {
+                    planePoints.push_back(hitPoints[i]);
+                }
+            }
+            if (planePoints.size() >= 3) {
+                // Fit plane using spanning vectors
+                // Wheels: 0=FL, 1=FR, 2=RL, 3=RR
+                glm::vec3 centroid(0.0f);
+                for (const auto& p : planePoints) centroid += p;
+                centroid /= (float)planePoints.size();
+                glm::vec3 across(0.0f), along(0.0f);
+                bool hasAcrossDbg = false, hasAlongDbg = false;
+                if (hasHits[0] && hasHits[1]) { across = hitPoints[1] - hitPoints[0]; hasAcrossDbg = true; }
+                else if (hasHits[2] && hasHits[3]) { across = hitPoints[3] - hitPoints[2]; hasAcrossDbg = true; }
+                if (hasHits[0] && hasHits[2]) { along = hitPoints[2] - hitPoints[0]; hasAlongDbg = true; }
+                else if (hasHits[1] && hasHits[3]) { along = hitPoints[3] - hitPoints[1]; hasAlongDbg = true; }
+                glm::vec3 normal(0, 1, 0);
+                if (hasAcrossDbg && hasAlongDbg) {
+                    glm::vec3 n = glm::cross(along, across);
+                    if (glm::length(n) > 0.0001f) {
+                        normal = glm::normalize(n);
+                        if (normal.y < 0.0f) normal = -normal;
+                    }
+                }
+                // Draw a quad for the plane
+                glm::vec3 ref = (fabs(normal.y) < 0.99f) ? glm::vec3(0,1,0) : glm::vec3(1,0,0);
+                glm::vec3 u = glm::normalize(glm::cross(ref, normal));
+                glm::vec3 v = glm::normalize(glm::cross(normal, u));
+                float planeSize = 0.8f;
+                for (int i = -2; i <= 2; ++i) {
+                    for (int j = -2; j <= 2; ++j) {
+                        glm::vec3 p = centroid + u * planeSize * (float)i + v * planeSize * (float)j;
+                        Transform debugTransform{p, glm::vec3(0.0f), glm::vec3(0.04f)};
+                        shader.setVec3("material.baseColor", glm::vec3(0.2f, 0.2f, 1.0f));
+                        shader.setBool("debug", true);
+                        debugCube->draw(shader, debugTransform);
+                    }
+                }
+            }
+            // Draw car rigid body
+            Transform carRidgidBodyTransform{car.body->m_obb.center, glm::eulerAngles(car.body->m_orientation), car.body->m_obb.halfExtents};
             shader.setVec3("material.baseColor", glm::vec3(0.0f, 0.0f, 1.0f));
+            shader.setBool("debug", true);
             debugCube->draw(shader, carRidgidBodyTransform);
         }
 
@@ -559,6 +471,7 @@ public:
             for (glm::vec3 point : m_sceneManager->getScene().trackSpline._points) {
                 shader.setVec3("material.baseColor", glm::vec3(1.0f, 0.0f, 0.0f));
                 Transform debugTransform{point, glm::vec3(0.0f), glm::vec3(0.1f)};
+                shader.setBool("debug", false);
                 debugCube->draw(shader, debugTransform);
             }
         }
