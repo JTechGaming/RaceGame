@@ -222,9 +222,13 @@ public:
             glm::mat3 rotMat = glm::mat3_cast(carRot);
 
             // --- MOVEMENT LOGIC (input, speed, steering) ---
-            // We'll use the previous orientation to move, then align to ground
+            // Extract heading as flat XZ direction — pitch/roll come only from ground alignment
             glm::vec3 carForward = rotMat[2];
             glm::vec3 carRight = rotMat[0];
+            // Flatten to pure heading so previous frame's tilt can't contaminate steering
+            carForward = glm::vec3(carForward.x, 0.0f, carForward.z);
+            if (glm::length(carForward) < 0.001f) carForward = glm::vec3(0, 0, 1);
+            carForward = glm::normalize(carForward);
 
             // --- DRIFT PARAMETERS ---
             const float driftEntrySpeed = 15.0f;      // min speed to start drifting
@@ -257,7 +261,9 @@ public:
             if (drift.isDrifting) effectiveSteerRate *= driftSteerMultiplier;
             float steerAmount = steerInput * effectiveSteerRate * steerScale * deltaTime;
             if (std::abs(steerAmount) > 0.0f) {
-                carForward = glm::normalize(glm::rotate(glm::angleAxis(steerAmount, rotMat[1]), carForward));
+                // Steer around world Y so steering only changes heading (yaw),
+                // not pitch/roll — the fit-plane alignment handles tilt separately.
+                carForward = glm::normalize(glm::rotate(glm::angleAxis(steerAmount, glm::vec3(0,1,0)), carForward));
 
                 // Cornering friction: turning scrubs speed due to tire lateral force
                 // More turning = more speed loss; reduced during drift (tires already sliding)
@@ -297,7 +303,7 @@ public:
                     float clampedAngle = glm::sign(drift.driftAngle) * maxDriftAngle;
                     // Rotate carForward to be maxDriftAngle away from velocityDir
                     drift.velocityDir = glm::normalize(glm::rotate(
-                        glm::angleAxis(-clampedAngle, rotMat[1]), carForward));
+                        glm::angleAxis(-clampedAngle, glm::vec3(0,1,0)), carForward));
                     drift.driftAngle = clampedAngle;
                 }
             } else {
