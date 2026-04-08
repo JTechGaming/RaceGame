@@ -281,6 +281,11 @@ public:
         draw(shader);
     }
 
+    void draw(Shader &shader, const glm::mat4& modelMatrix) {
+        shader.setMat4("model", modelMatrix);
+        draw(shader);
+    }
+
     std::vector<Mesh>* getMeshes() {
         return &meshes;
     }

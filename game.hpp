@@ -193,7 +193,7 @@ public:
         const float wallClearanceSide = 0.82f;
         const float wallProbeHalfWidth = 0.78f;
         const float orientationSmooth = 8.0f;
-        const float heightSmooth = 10.0f;
+        const float heightSmooth = 80.0f;
         const float groundNormalSmooth = 10.0f;
         const float groundSnapGrace = 0.16f;
         const float maxStepDown = 0.45f;
@@ -222,7 +222,7 @@ public:
             glm::mat3 rotMat = glm::mat3_cast(carRot);
 
             // --- MOVEMENT LOGIC (input, speed, steering) ---
-            // Extract heading as flat XZ direction — pitch/roll come only from ground alignment
+            // Extract heading as flat XZ direction pitch/roll come only from ground alignment
             glm::vec3 carForward = rotMat[2];
             glm::vec3 carRight = rotMat[0];
             // Flatten to pure heading so previous frame's tilt can't contaminate steering
@@ -318,12 +318,18 @@ public:
             // Move car along velocity direction (not facing direction)
             glm::vec3 candidatePos = carPos + drift.velocityDir * speed * deltaTime;
 
-            // --- GROUND ALIGNMENT (fit-plane) ---
+            // --- GROUND ALIGNMENT (fit plane) ---
+            // Build heading-only rotation for wheel raycasting (yaw only, no pitch/roll).
+            // Using the full rotMat (which includes previous-frame pitch/roll) causes
+            // the wheel XZ projections to shift when steering, producing a false roll.
+            glm::vec3 headingRight = glm::normalize(glm::cross(glm::vec3(0,1,0), carForward));
+            glm::mat3 headingRot(headingRight, glm::vec3(0,1,0), carForward);
+
             std::vector<glm::vec3> hitPoints;
             std::vector<glm::vec3> wheelWorlds;
             std::vector<bool> hasHits;
             for (const auto& wheel : vehicle.wheels) {
-                glm::vec3 worldWheel = candidatePos + rotMat * wheel.connectionPoint;
+                glm::vec3 worldWheel = candidatePos + headingRot * wheel.connectionPoint;
                 wheelWorlds.push_back(worldWheel);
                 glm::vec3 rayStart = glm::vec3(worldWheel.x, candidatePos.y + raycastHeight, worldWheel.z);
                 glm::vec3 down = glm::vec3(0, -1, 0);
@@ -343,13 +349,13 @@ public:
             bool isGrounded = (validHits >= 3);
             if (!isGrounded) {
                 // Airborne: apply gravity with accumulated vertical velocity
-                // speed *= glm::max(0.0f, 1.0f - coastDamping * deltaTime);
-                // m_fallSpeed[id] += 9.81f * deltaTime; // accumulate gravity
-                // candidatePos.y -= m_fallSpeed[id] * deltaTime;
-                // rb->m_position = candidatePos;
-                // rb->m_velocity = carForward * speed;
-                // m_forwardSpeed[id] = speed;
-                // rb->updateTransform();
+                speed *= glm::max(0.0f, 1.0f - coastDamping * deltaTime);
+                m_fallSpeed[id] += 9.81f * deltaTime; // accumulate gravity
+                candidatePos.y -= m_fallSpeed[id] * deltaTime;
+                rb->m_position = candidatePos;
+                rb->m_velocity = carForward * speed;
+                m_forwardSpeed[id] = speed;
+                rb->updateTransform();
                 continue;
             }
             m_fallSpeed[id] = 0.0f; // reset fall speed when grounded
@@ -366,8 +372,11 @@ public:
             if (hasAcross && hasAlong) {
                 glm::vec3 n = glm::cross(along, across);
                 if (glm::length(n) > 0.0001f) {
+                    glm::vec3 unnormalized = n;
                     normal = glm::normalize(n);
-                    if (normal.y < 0.0f) normal = -normal; // ensure pointing up
+                    if (normal.y < 0.0f) {
+                        normal = -normal;
+                    }
                 }
             }
             // Project car's forward vector onto plane for new forward
@@ -383,8 +392,8 @@ public:
             int hitCount = 0;
             for (size_t i = 0; i < hitPoints.size(); ++i) {
                 if (!hasHits[i]) continue;
-                // The wheel's local Y offset from the car body
-                float wheelLocalY = (rotMat * vehicle.wheels[i].connectionPoint).y;
+                // The wheel's local Y offset using the target orientation (not stale rotMat)
+                float wheelLocalY = (targetRotation * vehicle.wheels[i].connectionPoint).y;
                 // Car body Y should be: hitPoint.y + wheelRadius - wheelLocalY
                 targetY += hitPoints[i].y + wheelRadius - wheelLocalY;
                 hitCount++;
@@ -399,7 +408,7 @@ public:
                 glm::vec3 wallN = glm::normalize(hit.normal);
                 if (glm::dot(wallN, dir) > 0.0f) wallN = -wallN;
                 // Only react to near-vertical surfaces (walls)
-                if (std::abs(wallN.y) > 0.3f) return;
+                if (std::abs(wallN.y) > 0.4f) return;
                 float pen = clearance - hit.distance;
                 if (pen <= 0.0f) return;
                 candidatePos += wallN * (pen + wallPushback * 0.25f);
@@ -435,7 +444,6 @@ public:
 
         for (auto const& [id, body] : bodyMap) {
             objects[id].modelTransform.pos = body->m_position - glm::vec3(0.0f, body->m_obb.halfExtents.y, 0.0f);
-            objects[id].modelTransform.rot = glm::eulerAngles(body->m_orientation);
         }
 
         physicsEngine.step(deltaTime);
@@ -446,7 +454,19 @@ public:
     void OnPostRender(Shader& shader, float deltaTime) override {
         for (auto& el : objects) {
             shader.setBool("debug", false);
-            el.second.model->draw(shader, el.second.modelTransform);
+            auto bodyIt = bodyMap.find(el.first);
+            if (bodyIt != bodyMap.end()) {
+                // Physics objects: build model matrix directly from quaternion
+                // to avoid eulerAngles decomposition (YXZ) vs draw reconstruction (XYZ) mismatch
+                RigidBody* body = bodyIt->second;
+                glm::mat4 modelMat = glm::translate(glm::mat4(1.0f),
+                    body->m_position - glm::vec3(0.0f, body->m_obb.halfExtents.y, 0.0f))
+                    * glm::mat4_cast(body->m_orientation)
+                    * glm::scale(glm::mat4(1.0f), el.second.modelTransform.scale);
+                el.second.model->draw(shader, modelMat);
+            } else {
+                el.second.model->draw(shader, el.second.modelTransform);
+            }
         }
 
         if (m_wireframe) {
@@ -528,6 +548,7 @@ public:
                     planePoints.push_back(hitPoints[i]);
                 }
             }
+
             if (planePoints.size() >= 3) {
                 // Fit plane using spanning vectors
                 // Wheels: 0=FL, 1=FR, 2=RL, 3=RR
@@ -548,6 +569,19 @@ public:
                         if (normal.y < 0.0f) normal = -normal;
                     }
                 }
+                
+                // Draw normal line
+                glm::vec3 normalLineStart = carPos;
+                glm::vec3 normalLineEnd = carPos + normal * 2.0f;
+                int lineSteps = 20;
+                for (int s = 0; s <= lineSteps; ++s) {
+                    float t = (float)s / lineSteps;
+                    glm::vec3 p = glm::mix(normalLineStart, normalLineEnd, t);
+                    Transform debugTransform{p, glm::vec3(0.0f), glm::vec3(0.05f)};
+                    shader.setVec3("material.baseColor", glm::vec3(1.0f, 0.5f, 0.0f));
+                    shader.setBool("debug", true);
+                    debugCube->draw(shader, debugTransform);
+                }
                 // Draw a quad for the plane
                 glm::vec3 ref = (fabs(normal.y) < 0.99f) ? glm::vec3(0,1,0) : glm::vec3(1,0,0);
                 glm::vec3 u = glm::normalize(glm::cross(ref, normal));
@@ -564,10 +598,12 @@ public:
                 }
             }
             // Draw car rigid body
-            Transform carRidgidBodyTransform{car.body->m_obb.center, glm::eulerAngles(car.body->m_orientation), car.body->m_obb.halfExtents};
             shader.setVec3("material.baseColor", glm::vec3(0.0f, 0.0f, 1.0f));
             shader.setBool("debug", true);
-            debugCube->draw(shader, carRidgidBodyTransform);
+            glm::mat4 rbMat = glm::translate(glm::mat4(1.0f), car.body->m_obb.center)
+                * glm::mat4_cast(car.body->m_orientation)
+                * glm::scale(glm::mat4(1.0f), car.body->m_obb.halfExtents);
+            debugCube->draw(shader, rbMat);
         }
 
         if (m_debug) {
