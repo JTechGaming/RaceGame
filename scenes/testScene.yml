@@ -1,0 +1,20 @@
+name: "Test Scene"
+
+sceneObjects:
+  - model: "models/track"
+    pawnID: 0      # Anything higher than 0 is a valid ID
+    transform: {
+      pos: [ 0.0, 0.0, 0.0 ],
+      rot: [ 0.0, 0.0, 0.0 ],
+      scale: [ 0.12, 0.12, 0.12 ]
+    }
+
+startingPawn: 1
+
+trackSpline:
+  - pos: [ 0.0, 0.0, 0.0]
+  - pos: [ 3.0, 0.0, 0.0]
+  - pos: [ 6.0, 0.0, 0.0]
+  - pos: [ 9.0, 0.0, 0.0]
+  - pos: [ 12.0, 0.0, 0.0]
+  - pos: [ 15.0, 0.0, 0.0]

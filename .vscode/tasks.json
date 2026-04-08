@@ -4,7 +4,16 @@
         {
             "label": "Build & Run",
             "type": "shell",
-            "command": "/usr/bin/g++ -fdiagnostics-color=always -I/Users/1010182/Documents/RaceGame/libs -L/Users/1010182/Documents/RaceGame/libs /Users/1010182/Documents/RaceGame/main.cpp /Users/1010182/Documents/RaceGame/libs/glad.cpp -o /Users/1010182/Documents/RaceGame/game -lglfw3 -framework Cocoa -framework CoreFoundation -framework CoreGraphics -framework IOKit -framework AppKit ; /Users/1010182/Documents/RaceGame/game",
+            "command": "gcc -I/Users/1010182/Documents/RaceGame/libs -c /Users/1010182/Documents/RaceGame/libs/whereami.c -o /Users/1010182/Documents/RaceGame/libs/whereami.o && /usr/bin/g++ -std=c++20 -fdiagnostics-color=always -I/Users/1010182/Documents/RaceGame/libs -L/Users/1010182/Documents/RaceGame/libs /Users/1010182/Documents/RaceGame/main.cpp /Users/1010182/Documents/RaceGame/libs/miniaudio.c /Users/1010182/Documents/RaceGame/assetManager.cpp /Users/1010182/Documents/RaceGame/soundEngine.cpp /Users/1010182/Documents/RaceGame/mathHelper.cpp /Users/1010182/Documents/RaceGame/libs/glad.cpp /Users/1010182/Documents/RaceGame/libs/whereami.o -o /Users/1010182/Documents/RaceGame/game -lglfw3 -framework Cocoa -framework CoreFoundation -framework CoreGraphics -framework IOKit -framework AppKit && /Users/1010182/Documents/RaceGame/game",
+            "group": "build",
+            "presentation": {
+                "reveal": "always"
+            }
+        },
+        {
+            "label": "Build & Run (Windows)",
+            "type": "shell",
+            "command": "gcc -Ic:/Users/jaspe/RaceGame/libs -c c:/Users/jaspe/RaceGame/libs/whereami.c -o c:/Users/jaspe/RaceGame/libs/whereami.o ; g++ -std=c++20 -Ic:/Users/jaspe/RaceGame/libs -Lc:/Users/jaspe/RaceGame/libs -LC:/Users/jaspe/Documents/lib-mingw-w64 c:/Users/jaspe/RaceGame/main.cpp c:/Users/jaspe/RaceGame/libs/miniaudio.c c:/Users/jaspe/RaceGame/assetManager.cpp c:/Users/jaspe/RaceGame/soundEngine.cpp c:/Users/jaspe/RaceGame/mathHelper.cpp c:/Users/jaspe/RaceGame/libs/glad.cpp c:/Users/jaspe/RaceGame/libs/whereami.o C:/Users/jaspe/Documents/lib-mingw-w64/libglfw3.a -o c:/Users/jaspe/RaceGame/game.exe -lopengl32 -lgdi32 -luser32 -lshell32 ; ./game.exe",
             "group": "build",
             "presentation": {
                 "reveal": "always"
