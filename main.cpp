@@ -105,6 +105,8 @@ int main() {
 
     sceneManager.findScenes(stringPath);
 
+    sceneManager.loadScene("scene1");
+
     lastSceneTime = std::filesystem::last_write_time(sceneManager.getScene().scenePath);
 
     glEnable(GL_DEPTH_TEST);
@@ -139,8 +141,6 @@ int main() {
     
     game.OnInit(&assetManager, &sceneManager, stringPath);
     game.setWindow(window);
-
-    game.setDebug(true);
 
     currentCamera = &game.getCamera();
 
@@ -259,5 +259,13 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     if (key == GLFW_KEY_F && action == GLFW_PRESS) {
         WIREFRAME_MODE = !WIREFRAME_MODE;
         gameRef.setWireframe(WIREFRAME_MODE);
+    }
+    if (key == GLFW_KEY_1 && action == GLFW_PRESS) {
+        sceneManager.loadScene("scene1");
+        game.parseTrack(&sceneManager, &assetManager);
+    }
+    if (key == GLFW_KEY_2 && action == GLFW_PRESS) {
+        sceneManager.loadScene("scene2");
+        game.parseTrack(&sceneManager, &assetManager);
     }
 }

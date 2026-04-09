@@ -64,6 +64,17 @@ void buildTrackGrid(TrackCollider& track) {
 TrackCollider buildTrackCollider(ModelResource* model, const Transform& transform) {
     TrackCollider collider;
 
+    if (!model) {
+        std::cerr << "[buildTrackCollider] model is null\n";
+        return collider;
+    }
+
+    auto* meshes = model->getMeshes();
+    if (!meshes || meshes->empty()) {
+        std::cerr << "[buildTrackCollider] meshes are null/empty\n";
+        return collider;
+    }
+
     glm::mat4 modelMatrix =
         glm::translate(glm::mat4(1.0f), transform.pos) *
         glm::yawPitchRoll(
@@ -118,23 +129,9 @@ public:
 
         camera.attachToObject(&objects["Player"], glm::vec3(0.0f, 2.0f, 0.0f), 5.0f, -15.0f, 0.0f, {45.0f, 360.0f}, {2.0f, 10.0f});
 
-        trackModel = assetManager->loadModel(
-            AssetManager::buildModelPath("models/track")
-        );
+        parseTrack(sceneManager, assetManager);
 
-        Transform trackTransform;
-
-        for (const SceneObject& obj : m_sceneManager->getScene().sceneObjects) {
-            if (obj.modelPath == "models/track")
-            {
-                trackTransform = obj.transform;
-                break;
-            }
-        }
-
-        trackCollider = buildTrackCollider(trackModel, trackTransform);
-
-        printf("Track triangles: %zu\n", trackCollider.triangles.size());
+        std::cout << "parsing done\n";
 
         RacingVehicle playerVehicle;
         playerVehicle.body = playerBody;
@@ -171,6 +168,52 @@ public:
         }
 
         debugCube = m_assetManager->loadModel(AssetManager::buildModelPath("models/cube"));
+    }
+
+    void parseTrack(SceneManager *sceneManager, AssetManager *assetManager) {
+        std::cout << sceneManager->getLoadedSceneName() << "\n";
+
+        if (sceneManager->getLoadedSceneName() == "scene1") {
+            trackModel = assetManager->loadModel(AssetManager::buildModelPath("models/track"));
+        } else if (sceneManager->getLoadedSceneName() == "scene2") {
+            trackModel = assetManager->loadModel(AssetManager::buildModelPath("models/track2"));
+        } else {
+            trackModel = nullptr;
+        }
+
+        if (!trackModel) {
+            std::cerr << "[parseTrack] failed to load track model\n";
+            trackCollider = {};
+            return;
+        }
+
+        Transform trackTransform{
+            glm::vec3(0.0f),
+            glm::vec3(0.0f),
+            glm::vec3(1.0f)
+        };
+
+        bool foundTrackTransform = false;
+
+        for (const SceneObject &obj : m_sceneManager->getScene().sceneObjects) {
+            if (sceneManager->getLoadedSceneName() == "scene1" && obj.modelPath == "models/track") {
+                trackTransform = obj.transform;
+                foundTrackTransform = true;
+                break;
+            }
+            if (sceneManager->getLoadedSceneName() == "scene2" && obj.modelPath == "models/track2") {
+                trackTransform = obj.transform;
+                foundTrackTransform = true;
+                break;
+            }
+        }
+
+        if (!foundTrackTransform) {
+            std::cerr << "[parseTrack] track transform not found in scene, using identity transform\n";
+        }
+
+        trackCollider = buildTrackCollider(trackModel, trackTransform);
+        std::cout << "Track triangles: " << trackCollider.triangles.size() << "\n";
     }
 
     void OnShutdown() override {}

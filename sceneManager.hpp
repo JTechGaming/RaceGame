@@ -200,7 +200,7 @@ public:
             }
             scene.trackSpline = Spline(std::move(splinePoints));
 
-            loadScene(std::move(scene));
+            scenes.emplace_back(std::move(scene));
         } catch (const std::exception& e) {
             std::cerr << "Error parsing scene: " << e.what() << std::endl;
             return;
@@ -210,18 +210,29 @@ public:
         }
     }
 
-    void loadScene(const ParsedScene scene) {
-        currentScene = scene;
+    void loadScene(std::string sceneName) {
+        for (int i=0; i<scenes.size(); i++) {
+            if (scenes[i].sceneName == sceneName) {
+                currentScene = i;
+                return;
+            }
+        }
+        std::cout << "Scene not found: " << sceneName << "\n";
     }
 
     void reloadScene(std::string stringPath) {
-        parseScene(currentScene.scenePath, stringPath);
+        parseScene(scenes[currentScene].scenePath, stringPath);
     }
 
     ParsedScene getScene() {
-        return currentScene;
+        return scenes[currentScene];
+    }
+
+    const std::string& getLoadedSceneName() {
+        return scenes[currentScene].sceneName;
     }
 
 private:
-    ParsedScene currentScene;
+    size_t currentScene = 0;
+    std::vector<ParsedScene> scenes;
 };
